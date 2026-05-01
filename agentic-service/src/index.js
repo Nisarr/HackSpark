@@ -106,10 +106,12 @@ async function fetchGroundingData(message) {
     }
 
     if (lower.includes('peak') || lower.includes('busiest') || lower.includes('rush')) {
-      const fromMonth = lower.match(/(\d{4}-\d{2})/);
-      if (fromMonth) {
+      const monthMatches = lower.match(/\d{4}-\d{2}/g);
+      if (monthMatches && monthMatches.length >= 1) {
+        const fromM = monthMatches[0];
+        const toM = monthMatches.length >= 2 ? monthMatches[1] : monthMatches[0];
         try {
-          const { data } = await axios.get(`${ANALYTICS_URL}/analytics/peak-window`, { params: { from: fromMonth[1], to: fromMonth[1] }, timeout: 5000 });
+          const { data } = await axios.get(`${ANALYTICS_URL}/analytics/peak-window`, { params: { from: fromM, to: toM }, timeout: 5000 });
           context += `Peak window data: ${JSON.stringify(data)}\n`;
         } catch { /* skip */ }
       }
@@ -120,7 +122,8 @@ async function fetchGroundingData(message) {
       if (monthMatch) {
         try {
           const { data } = await axios.get(`${ANALYTICS_URL}/analytics/surge-days`, { params: { month: monthMatch[1] }, timeout: 5000 });
-          context += `Surge data: ${JSON.stringify(data.data?.slice(0, 10))}\n`;
+          // Only pass days that actually have a surge to save LLM context, or pass all. We will pass all to allow answering 'is there a surge after X'.
+          context += `Surge data: ${JSON.stringify(data.data)}\n`;
         } catch { /* skip */ }
       }
     }
