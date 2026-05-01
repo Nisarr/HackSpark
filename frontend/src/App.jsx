@@ -103,6 +103,14 @@ function TopNav({ darkMode, toggleDarkMode }) {
   );
 }
 
+function ProtectedRoute({ children }) {
+  const isAuthenticated = !!localStorage.getItem('token');
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+  return children;
+}
+
 export default function App() {
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -133,13 +141,13 @@ export default function App() {
             <Route path="/"             element={<Home />} />
             <Route path="/login"        element={<Login />} />
             <Route path="/register"     element={<Register />} />
-            <Route path="/products"     element={<Products />} />
-            <Route path="/availability" element={<Availability />} />
-            <Route path="/chat"         element={<ChatPage />} />
-            <Route path="/trending"     element={<Trending />} />
-            <Route path="/discount"     element={<Discount />} />
-            <Route path="/analytics"    element={<Analytics />} />
-            <Route path="/pulse"        element={<Pulse />} />
+            <Route path="/products"     element={<ProtectedRoute><Products /></ProtectedRoute>} />
+            <Route path="/availability" element={<ProtectedRoute><Availability /></ProtectedRoute>} />
+            <Route path="/chat"         element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
+            <Route path="/trending"     element={<ProtectedRoute><Trending /></ProtectedRoute>} />
+            <Route path="/discount"     element={<ProtectedRoute><Discount /></ProtectedRoute>} />
+            <Route path="/analytics"    element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+            <Route path="/pulse"        element={<ProtectedRoute><Pulse /></ProtectedRoute>} />
           </Routes>
         </main>
       </div>
