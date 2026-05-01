@@ -96,11 +96,14 @@ services:
     ports:
       - "${USER_SERVICE_PORT:-8001}:8001"
     environment:
-      PORT:              8001
-      DATABASE_URL:      ${DATABASE_URL}
-      JWT_SECRET:        ${JWT_SECRET}
-      CENTRAL_API_URL:   ${CENTRAL_API_URL}
-      CENTRAL_API_TOKEN: ${CENTRAL_API_TOKEN}
+      PORT:                      8001
+      DATABASE_URL:              ${DATABASE_URL}
+      JWT_SECRET:                ${JWT_SECRET}
+      CENTRAL_API_URL:           ${CENTRAL_API_URL}
+      CENTRAL_API_TOKEN:         ${CENTRAL_API_TOKEN}
+      SUPABASE_URL:              ${SUPABASE_URL}
+      SUPABASE_ANON_KEY:         ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -174,6 +177,7 @@ services:
       CENTRAL_API_URL:       ${CENTRAL_API_URL}
       CENTRAL_API_TOKEN:     ${CENTRAL_API_TOKEN}
       GEMINI_API_KEY:        ${GEMINI_API_KEY:-}
+      GROQ_API_KEY:          ${GROQ_API_KEY}
       ANALYTICS_SERVICE_URL: http://analytics-service:8003
       RENTAL_SERVICE_URL:    http://rental-service:8002
       REDIS_URL:             redis://redis:6379

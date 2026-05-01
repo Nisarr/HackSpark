@@ -55,11 +55,12 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log('[agentic-service] MongoDB connected'))
   .catch(err => console.error('[agentic-service] MongoDB error:', err.message));
 
-// ── Gemini client ──
-let genAI, model;
-if (GEMINI_API_KEY) {
-  genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+// ── Groq client ──
+let groq;
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+if (GROQ_API_KEY) {
+  const Groq = require('groq-sdk');
+  groq = new Groq({ apiKey: GROQ_API_KEY });
 }
 
 // ── Central API client ──
@@ -234,8 +235,8 @@ app.post('/chat', async (req, res) => {
       return res.json({ sessionId, reply: refusal });
     }
 
-    if (!model) {
-      return res.json({ sessionId, reply: "AI service is not configured. Please set GEMINI_API_KEY." });
+    if (!groq) {
+      return res.json({ sessionId, reply: "AI service is not configured. Please set GROQ_API_KEY." });
     }
 
     // P16: Load conversation history
@@ -245,7 +246,7 @@ app.post('/chat', async (req, res) => {
     // P15: Fetch grounding data
     const groundingContext = await fetchGroundingData(message);
 
-    // Build conversation for Gemini
+    // Build conversation for Groq LLaMA
     const systemPrompt = `You are RentPi Assistant, a helpful AI for the RentPi rental marketplace platform. 
 Answer ONLY questions about RentPi: rentals, products, categories, pricing, availability, discounts, trends.
 Use the provided data context to answer accurately. NEVER invent numbers or data.
@@ -253,22 +254,18 @@ If data is unavailable, say so explicitly. Be concise and helpful.
 
 ${groundingContext ? `DATA CONTEXT:\n${groundingContext}` : ''}`;
 
-    const chatHistory = history.map(m => ({
-      role: m.role === 'user' ? 'user' : 'model',
-      parts: [{ text: m.content }],
-    }));
+    const groqMessages = [
+      { role: 'system', content: systemPrompt },
+      ...history.map(m => ({ role: m.role, content: m.content })),
+      { role: 'user', content: message }
+    ];
 
-    const chatModel = genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash',
-      systemInstruction: systemPrompt,
+    const completion = await groq.chat.completions.create({
+      messages: groqMessages,
+      model: "llama-3.1-8b-instant", 
     });
 
-    const chat = chatModel.startChat({
-      history: chatHistory,
-    });
-
-    const result = await chat.sendMessage(message);
-    const reply = result.response.text();
+    const reply = completion.choices[0]?.message?.content || "Sorry, I couldn't generate a response.";
 
     // Save messages to MongoDB
     await Message.create({ sessionId, role: 'user', content: message });
@@ -280,10 +277,14 @@ ${groundingContext ? `DATA CONTEXT:\n${groundingContext}` : ''}`;
       // Auto-generate session name via lightweight LLM call
       let sessionName = 'New Chat';
       try {
-        const nameResult = await model.generateContent(
-          `Given this first user message, reply with ONLY a short 3-5 word title for this conversation. No punctuation. Message: "${message}"`
-        );
-        sessionName = nameResult.response.text().trim();
+        const nameCompletion = await groq.chat.completions.create({
+          messages: [
+            { role: 'system', content: 'You are a helpful assistant.' },
+            { role: 'user', content: `Given this first user message, reply with ONLY a short 3-5 word title for this conversation. No punctuation. Message: "${message}"` }
+          ],
+          model: "llama-3.1-8b-instant",
+        });
+        sessionName = nameCompletion.choices[0]?.message?.content?.trim() || 'New Chat';
       } catch { /* fallback name */ }
 
       session = await Session.create({
