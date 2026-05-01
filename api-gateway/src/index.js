@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const axios = require('axios');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -39,32 +40,43 @@ app.get('/status', async (req, res) => {
   });
 });
 
+// ── Global Rate Limiting (Max 20 req/min) ──
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 20,
+  keyGenerator: () => 'global', // Apply limit globally across all IPs
+  message: { error: 'Too many requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(globalLimiter);
+
 // ── Proxy: /users/* → user-service ──
 app.use('/users', createProxyMiddleware({
   target: SERVICES['user-service'],
   changeOrigin: true,
-  pathRewrite: { '^/users': '/users' },
+  pathRewrite: (path, req) => `/users${req.url}`,
 }));
 
 // ── Proxy: /rentals/* → rental-service ──
 app.use('/rentals', createProxyMiddleware({
   target: SERVICES['rental-service'],
   changeOrigin: true,
-  pathRewrite: { '^/rentals': '/rentals' },
+  pathRewrite: (path, req) => `/rentals${req.url}`,
 }));
 
 // ── Proxy: /analytics/* → analytics-service ──
 app.use('/analytics', createProxyMiddleware({
   target: SERVICES['analytics-service'],
   changeOrigin: true,
-  pathRewrite: { '^/analytics': '/analytics' },
+  pathRewrite: (path, req) => `/analytics${req.url}`,
 }));
 
 // ── Proxy: /chat/* → agentic-service ──
 app.use('/chat', createProxyMiddleware({
   target: SERVICES['agentic-service'],
   changeOrigin: true,
-  pathRewrite: { '^/chat': '/chat' },
+  pathRewrite: (path, req) => `/chat${req.url}`,
 }));
 
 app.listen(PORT, '0.0.0.0', () => {
