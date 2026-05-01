@@ -96,8 +96,8 @@ centralApiClient.interceptors.response.use(
       const finalDelayMs = Math.round((delay + jitter) * 1000);
 
       config.retryCount += 1;
-      console.log(`[retry ${config.retryCount}/3] waiting ${Math.round(finalDelayMs/1000)}s before retrying ${config.method.toUpperCase()} ${config.url}`);
-      
+      console.log(`[retry ${config.retryCount}/3] waiting ${Math.round(finalDelayMs / 1000)}s before retrying ${config.method.toUpperCase()} ${config.url}`);
+
       await new Promise(resolve => setTimeout(resolve, finalDelayMs));
       return centralApiClient(config);
     }
@@ -262,7 +262,7 @@ ${groundingContext ? `DATA CONTEXT:\n${groundingContext}` : ''}`;
 
     const completion = await groq.chat.completions.create({
       messages: groqMessages,
-      model: "llama-3.1-8b-instant", 
+      model: "llama-3.1-8b-instant",
     });
 
     const reply = completion.choices[0]?.message?.content || "Sorry, I couldn't generate a response.";

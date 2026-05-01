@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
-import { Sun, Moon, Package, Calendar, TrendingUp, Tag, BarChart2, MessageSquare, LogOut, LogIn } from 'lucide-react';
+import { Sun, Moon, Package, Calendar, TrendingUp, Tag, BarChart2, MessageSquare, LogOut, LogIn, Globe } from 'lucide-react';
+import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Products from './pages/Products';
@@ -12,6 +13,7 @@ import ChatPage from './pages/Chat';
 import ChatWidget from './components/ChatWidget';
 
 const NAV_ITEMS = [
+  { to: '/',             icon: Globe, label: 'Home' },
   { to: '/products',     icon: Package, label: 'Products' },
   { to: '/availability', icon: Calendar, label: 'Availability' },
   { to: '/trending',     icon: TrendingUp, label: 'Trending' },
@@ -125,7 +127,7 @@ export default function App() {
       <div className="pt-20 min-h-screen pb-10">
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <Routes>
-            <Route path="/"             element={<Navigate to="/products" />} />
+            <Route path="/"             element={<Home />} />
             <Route path="/login"        element={<Login />} />
             <Route path="/register"     element={<Register />} />
             <Route path="/products"     element={<Products />} />
