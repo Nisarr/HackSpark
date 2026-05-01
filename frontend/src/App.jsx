@@ -11,6 +11,7 @@ import Discount from './pages/Discount';
 import Analytics from './pages/Analytics';
 import ChatPage from './pages/Chat';
 import ChatWidget from './components/ChatWidget';
+import RateLimitOverlay from './components/RateLimitOverlay';
 
 const NAV_ITEMS = [
   { to: '/',             icon: Globe, label: 'Home' },
@@ -140,6 +141,7 @@ export default function App() {
         </main>
       </div>
       <ChatWidget />
+      <RateLimitOverlay />
     </BrowserRouter>
   );
 }

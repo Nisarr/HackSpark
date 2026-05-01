@@ -1,12 +1,9 @@
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 8001;
-const CENTRAL_API_URL = process.env.CENTRAL_API_URL;
-const CENTRAL_API_TOKEN = process.env.CENTRAL_API_TOKEN;
 
 // ── Supabase Setup ──
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -20,7 +17,7 @@ const supabase = createClient(SUPABASE_URL || 'https://placeholder.supabase.co',
 app.use(cors());
 app.use(express.json());
 
-
+const { centralApi, getCacheStats } = require('./central-api-client');
 
 // Supabase Auth Middleware
 async function authMiddleware(req, res, next) {
@@ -105,17 +102,7 @@ app.get('/users/:id/discount', async (req, res) => {
     
     const { data } = await centralApi().get(`/api/data/users/${mappedId}`);
     const s = data.securityScore;
-
-    if (s < 0 || s > 100) {
-      console.warn(`[WARN] Invalid securityScore ${s} for user ${mappedId}`);
-      return res.status(500).json({ 
-        error: 'Invalid security score from Central API',
-        received: s 
-      });
-    }
-
     const discountPercent = s >= 80 ? 20 : s >= 60 ? 15 : s >= 40 ? 10 : s >= 20 ? 5 : 0;
-    console.log(`[P6] User ${mappedId}: score=${s}, discount=${discountPercent}%`);
     res.json({ userId: originalId, securityScore: s, discountPercent });
   } catch (err) {
     if (err.response?.status === 503) return res.status(503).json(err.response.data);

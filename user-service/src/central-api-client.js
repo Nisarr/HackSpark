@@ -162,6 +162,7 @@ const CACHE_TTL_MAP = [
   { pattern: /\/api\/data\/products/,            ttl: 120 },  // 2 min
   { pattern: /\/api\/data\/rentals\/stats/,      ttl: 180 },  // 3 min
   { pattern: /\/api\/data\/rentals/,             ttl: 60  },  // 1 min
+  { pattern: /\/api\/data\/users\/\d+/,          ttl: 120 },  // 2 min (user/discount)
 ];
 
 function getCacheTTL(url) {

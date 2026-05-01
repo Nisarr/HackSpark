@@ -13,6 +13,7 @@
     "axios": "^1.7.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
+    "ioredis": "^5.4.1",
     "express-rate-limit": "^8.4.1",
     "groq-sdk": "^1.1.2",
     "mongoose": "^8.8.0",
