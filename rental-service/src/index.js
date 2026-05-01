@@ -506,10 +506,17 @@ app.get('/rentals/merged-feed', async (req, res) => {
       return res.status(400).json({ error: 'productIds is required' });
     }
 
-    const productIds = [...new Set(pidsStr.split(',').map(Number).filter(n => !isNaN(n)))];
-    if (productIds.length < 1 || productIds.length > 10) {
+    const parts = pidsStr.split(',');
+    if (parts.length < 1 || parts.length > 10) {
       return res.status(400).json({ error: 'productIds must be 1-10 comma-separated integers' });
     }
+    
+    const parsed = parts.map(Number);
+    if (parsed.some(n => isNaN(n) || !Number.isInteger(n))) {
+      return res.status(400).json({ error: 'productIds must be 1-10 comma-separated integers' });
+    }
+
+    const productIds = [...new Set(parsed)];
 
     const limit = parseInt(limitStr) || 30;
     if (limit < 1 || limit > 100) {

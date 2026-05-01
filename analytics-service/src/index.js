@@ -109,39 +109,39 @@ app.get('/analytics/surge-days', async (req, res) => {
 
     // Build full month array (fill missing with 0)
     const [y, m] = month.split('-').map(Number);
-    const daysInMonth = new Date(y, m, 0).getDate();
+    const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
     const days = [];
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${month}-${String(d).padStart(2, '0')}`;
       days.push({ date: dateStr, count: countMap[dateStr] || 0 });
     }
 
-    // Monotonic stack: next greater element (right to left)
+    // Monotonic stack: left-to-right pass keeping track of days waiting for a surge
     const result = new Array(days.length).fill(null);
     const stack = []; // stack of indices
 
-    for (let i = days.length - 1; i >= 0; i--) {
-      // Pop elements that are not strictly greater
-      while (stack.length > 0 && days[stack[stack.length - 1]].count <= days[i].count) {
-        stack.pop();
-      }
-      if (stack.length > 0) {
-        const j = stack[stack.length - 1];
-        result[i] = {
-          date: days[i].date,
-          count: days[i].count,
-          nextSurgeDate: days[j].date,
-          daysUntil: j - i,
-        };
-      } else {
-        result[i] = {
-          date: days[i].date,
-          count: days[i].count,
-          nextSurgeDate: null,
-          daysUntil: null,
+    for (let i = 0; i < days.length; i++) {
+      // If today's count is strictly higher, it resolves the waiting days in the stack
+      while (stack.length > 0 && days[i].count > days[stack[stack.length - 1]].count) {
+        const prevIdx = stack.pop();
+        result[prevIdx] = {
+          date: days[prevIdx].date,
+          count: days[prevIdx].count,
+          nextSurgeDate: days[i].date,
+          daysUntil: i - prevIdx,
         };
       }
       stack.push(i);
+    }
+
+    // Any days left in the stack never found a higher surge day
+    for (const remainingIdx of stack) {
+      result[remainingIdx] = {
+        date: days[remainingIdx].date,
+        count: days[remainingIdx].count,
+        nextSurgeDate: null,
+        daysUntil: null,
+      };
     }
 
     res.json({ month, data: result });
