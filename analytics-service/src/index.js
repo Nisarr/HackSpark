@@ -154,17 +154,16 @@ app.get('/analytics/surge-days', async (req, res) => {
 
 // ── P14: Seasonal Recommendations ──
 async function fetchRecommendations(date, limitNum) {
-  const targetDate = new Date(date);
-  const year = targetDate.getFullYear();
+  const [targetYear, targetMonth, targetDay] = date.split('-').map(Number);
 
     // Build 15-day windows (7 days before and after) for past 2 years
     const windows = [];
-    for (let y = year - 2; y < year; y++) {
-      const centerDate = new Date(y, targetDate.getMonth(), targetDate.getDate());
+    for (let y = targetYear - 2; y < targetYear; y++) {
+      const centerDate = new Date(Date.UTC(y, targetMonth - 1, targetDay));
       const windowStart = new Date(centerDate);
-      windowStart.setDate(windowStart.getDate() - 7);
+      windowStart.setUTCDate(windowStart.getUTCDate() - 7);
       const windowEnd = new Date(centerDate);
-      windowEnd.setDate(windowEnd.getDate() + 7);
+      windowEnd.setUTCDate(windowEnd.getUTCDate() + 7);
       windows.push({ from: windowStart, to: windowEnd });
     }
 
@@ -234,9 +233,12 @@ app.get('/analytics/recommendations', async (req, res) => {
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ error: 'date must be a valid YYYY-MM-DD string' });
     }
-    const limitNum = parseInt(limitStr) || 10;
-    if (limitNum < 1 || limitNum > 50) {
-      return res.status(400).json({ error: 'limit must be 1-50' });
+    let limitNum = 10;
+    if (limitStr !== undefined) {
+      limitNum = Number(limitStr);
+      if (!Number.isInteger(limitNum) || limitNum < 1 || limitNum > 50) {
+        return res.status(400).json({ error: 'limit must be a positive integer, max 50' });
+      }
     }
 
     const recommendations = await fetchRecommendations(date, limitNum);

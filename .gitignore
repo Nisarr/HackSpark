@@ -21,7 +21,7 @@ obj/
 # Environment files — NEVER commit secrets
 .env
 .env.local
-.env.
+.env.example
 .env.*.local
 *.env
 

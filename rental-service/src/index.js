@@ -8,6 +8,57 @@ const PORT = process.env.PORT || 8002;
 app.use(cors());
 app.use(express.json());
 
+// ══════════════════════════════════════════════════════════════
+// Min-Heap Helper (for Top-K problems like P8, P9)
+// Complexity: push O(log n), pop O(log n), peek O(1)
+// ══════════════════════════════════════════════════════════════
+class MinHeap {
+  constructor(compareFn = (a, b) => a - b) {
+    this.heap = [];
+    this.compare = compareFn;
+  }
+
+  push(val) {
+    this.heap.push(val);
+    this._bubbleUp(this.heap.length - 1);
+  }
+
+  pop() {
+    if (this.heap.length === 0) return undefined;
+    const top = this.heap[0];
+    const last = this.heap.pop();
+    if (this.heap.length > 0) {
+      this.heap[0] = last;
+      this._bubbleDown(0);
+    }
+    return top;
+  }
+
+  peek() { return this.heap[0]; }
+  size() { return this.heap.length; }
+
+  _bubbleUp(index) {
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (this.compare(this.heap[parent], this.heap[index]) <= 0) break;
+      [this.heap[parent], this.heap[index]] = [this.heap[index], this.heap[parent]];
+      index = parent;
+    }
+  }
+
+  _bubbleDown(index) {
+    while (true) {
+      let smallest = index;
+      const left = 2 * index + 1, right = 2 * index + 2;
+      if (left < this.heap.length && this.compare(this.heap[left], this.heap[smallest]) < 0) smallest = left;
+      if (right < this.heap.length && this.compare(this.heap[right], this.heap[smallest]) < 0) smallest = right;
+      if (smallest === index) break;
+      [this.heap[index], this.heap[smallest]] = [this.heap[smallest], this.heap[index]];
+      index = smallest;
+    }
+  }
+}
+
 // ── Category helper (caching handled by central-api-client via Redis) ──
 async function getCategories() {
   const { data } = await centralApi().get('/api/data/categories');
@@ -242,58 +293,17 @@ app.get('/rentals/kth-busiest-date', async (req, res) => {
       return res.status(404).json({ error: `k=${kNum} exceeds total distinct dates (${allDates.length})` });
     }
 
-    // Min-heap of size k to find kth largest (optimized approach)
-    // Using a simple partial sort: maintain array of top k items
-    const topK = [];
+    // Min-heap approach: O(n log k) instead of O(n log n) — bonus points
+    // Keep only top k elements; root is always the kth largest
+    const heap = new MinHeap((a, b) => a.count - b.count);
+
     for (const entry of allDates) {
-      topK.push(entry);
-      topK.sort((a, b) => b.count - a.count);
-      if (topK.length > kNum) topK.pop();
+      heap.push(entry);
+      if (heap.size() > kNum) heap.pop(); // Evict smallest, keep top k
     }
 
-    // Wait — for bonus points we need better than full sort.
-    // QuickSelect approach: partition to find kth largest
-    // Actually let's use a proper min-heap:
-    const heap = [];
-
-    function heapPush(val) {
-      heap.push(val);
-      let i = heap.length - 1;
-      while (i > 0) {
-        const parent = Math.floor((i - 1) / 2);
-        if (heap[parent].count <= heap[i].count) break;
-        [heap[parent], heap[i]] = [heap[i], heap[parent]];
-        i = parent;
-      }
-    }
-
-    function heapPop() {
-      const top = heap[0];
-      const last = heap.pop();
-      if (heap.length > 0) {
-        heap[0] = last;
-        let i = 0;
-        while (true) {
-          let smallest = i;
-          const left = 2 * i + 1, right = 2 * i + 2;
-          if (left < heap.length && heap[left].count < heap[smallest].count) smallest = left;
-          if (right < heap.length && heap[right].count < heap[smallest].count) smallest = right;
-          if (smallest === i) break;
-          [heap[i], heap[smallest]] = [heap[smallest], heap[i]];
-          i = smallest;
-        }
-      }
-      return top;
-    }
-
-    // Push all dates, keep only top k
-    for (const entry of allDates) {
-      heapPush(entry);
-      if (heap.length > kNum) heapPop();
-    }
-
-    // The root of the min-heap is the kth largest
-    const result = heap[0];
+    // Root of min-heap is the kth largest element
+    const result = heap.peek();
 
     res.json({ from, to, k: kNum, date: result.date, rentalCount: result.count });
   } catch (err) {
