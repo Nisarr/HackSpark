@@ -1,0 +1,17 @@
+{
+  "name": "agentic-service",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "cors": "^2.8.5",
+    "mongoose": "^8.8.0",
+    "axios": "^1.7.0",
+    "@google/generative-ai": "^0.21.0",
+    "uuid": "^10.0.0"
+  }
+}

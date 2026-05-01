@@ -1,0 +1,14 @@
+{
+  "name": "rental-service",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "cors": "^2.8.5",
+    "axios": "^1.7.0"
+  }
+}
