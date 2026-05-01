@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const axios = require('axios');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { v4: uuidv4 } = require('uuid');
 const grpc = require('@grpc/grpc-js');
 const protoLoader = require('@grpc/proto-loader');
@@ -11,7 +10,6 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 8004;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://mongodb:27017/rentpi_agentic';
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ANALYTICS_URL = process.env.ANALYTICS_SERVICE_URL || 'http://analytics-service:8003';
 const RENTAL_URL = process.env.RENTAL_SERVICE_URL || 'http://rental-service:8002';
 const ANALYTICS_GRPC_URL = process.env.ANALYTICS_GRPC_URL || 'analytics-service:50051';
@@ -72,6 +70,8 @@ const RENTPI_KEYWORDS = [
   'lease', 'hire', 'borrow', 'equipment', 'tool', 'vehicle',
   'electronic', 'furniture', 'outdoor', 'sport', 'music',
   'camera', 'busy', 'free', 'streak', 'season', 'categories',
+  'stat', 'total', 'count', 'top', 'most', 'popular', 'user',
+  'inventory', 'listing', 'order', 'item',
 ];
 
 function isOnTopic(message) {
@@ -85,7 +85,7 @@ async function fetchGroundingData(message) {
   let context = '';
 
   try {
-    if (lower.includes('most rent') || lower.includes('category') && (lower.includes('most') || lower.includes('popular'))) {
+    if (lower.includes('most rent') || lower.includes('stat') || lower.includes('total') || (lower.includes('category') && (lower.includes('most') || lower.includes('popular') || lower.includes('top')))) {
       const { data } = await centralApi().get('/api/data/rentals/stats', { params: { group_by: 'category' } });
       context += `Category rental stats: ${JSON.stringify(data.data)}\n`;
     }
@@ -205,9 +205,10 @@ app.post('/chat', async (req, res) => {
     const systemPrompt = `You are RentPi Assistant, a helpful AI for the RentPi rental marketplace platform. 
 Answer ONLY questions about RentPi: rentals, products, categories, pricing, availability, discounts, trends.
 Use the provided data context to answer accurately. NEVER invent numbers or data.
-If data is unavailable, say so explicitly. Be concise and helpful.
+If no data context is provided below, or if the data is empty, tell the user that the data is currently unavailable and you cannot answer that specific question right now. Never guess or make up numbers.
+Be concise and helpful.
 
-${groundingContext ? `DATA CONTEXT:\n${groundingContext}` : ''}`;
+${groundingContext ? `DATA CONTEXT:\n${groundingContext}` : 'NO DATA CONTEXT AVAILABLE — do not guess, tell the user data is unavailable.'}`;
 
     const groqMessages = [
       { role: 'system', content: systemPrompt },
