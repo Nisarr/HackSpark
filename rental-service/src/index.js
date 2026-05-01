@@ -395,9 +395,12 @@ app.get('/rentals/users/:id/top-categories', async (req, res) => {
 app.get('/rentals/products/:id/free-streak', async (req, res) => {
   try {
     const productId = parseInt(req.params.id);
+    if (isNaN(productId) || productId < 1) {
+      return res.status(400).json({ error: 'Invalid product ID' });
+    }
     const year = parseInt(req.query.year);
-    if (isNaN(year)) {
-      return res.status(400).json({ error: 'year must be a valid integer' });
+    if (isNaN(year) || year < 1900 || year > 2100) {
+      return res.status(400).json({ error: 'year must be between 1900 and 2100' });
     }
 
     const yearStart = new Date(`${year}-01-01`);
@@ -487,6 +490,16 @@ app.get('/rentals/products/:id/free-streak', async (req, res) => {
         from: new Date(lastEnd.getTime() + 86400000).toISOString().split('T')[0],
         to: yearEnd.toISOString().split('T')[0],
         days: daysAfter,
+      };
+    }
+
+    if (longest.days === 0 && merged.length > 0) {
+      // Product was rented for entire year
+      longest = {
+        from: null,
+        to: null,
+        days: 0,
+        message: "Product was rented for the entire year"
       };
     }
 
