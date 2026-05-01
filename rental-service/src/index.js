@@ -1,79 +1,23 @@
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
+const { centralApi, getCacheStats } = require('./central-api-client');
 
 const app = express();
 const PORT = process.env.PORT || 8002;
-const CENTRAL_API_URL = process.env.CENTRAL_API_URL;
-const CENTRAL_API_TOKEN = process.env.CENTRAL_API_TOKEN;
 
 app.use(cors());
 app.use(express.json());
 
-// ── Central API client ──
-const centralApiClient = axios.create({
-  baseURL: CENTRAL_API_URL,
-  headers: { Authorization: `Bearer ${CENTRAL_API_TOKEN}` },
-  timeout: 10000,
-});
-
-centralApiClient.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const config = error.config;
-    if (!config) return Promise.reject(error);
-
-    config.retryCount = config.retryCount || 0;
-
-    if (error.response && error.response.status === 429) {
-      if (config.retryCount >= 3) {
-        const lastRetryAfter = error.response.data?.retryAfterSeconds || 60;
-        error.response.status = 503;
-        error.response.data = {
-          error: "Central API unavailable after 3 retries",
-          lastRetryAfter: lastRetryAfter,
-          suggestion: "Try again in ~2 minutes"
-        };
-        return Promise.reject(error);
-      }
-
-      const retryAfter = error.response.data?.retryAfterSeconds || 5;
-      const delay = retryAfter * Math.pow(2, config.retryCount);
-      const jitter = delay * 0.2 * (Math.random() * 2 - 1);
-      const finalDelayMs = Math.round((delay + jitter) * 1000);
-
-      config.retryCount += 1;
-      console.log(`[retry ${config.retryCount}/3] waiting ${Math.round(finalDelayMs/1000)}s before retrying ${config.method.toUpperCase()} ${config.url}`);
-      
-      await new Promise(resolve => setTimeout(resolve, finalDelayMs));
-      return centralApiClient(config);
-    }
-    return Promise.reject(error);
-  }
-);
-
-function centralApi() {
-  return centralApiClient;
-}
-
-// ── Category cache (P5) ──
-let cachedCategories = null;
-let categoryCacheTime = 0;
-const CATEGORY_CACHE_TTL = 10 * 60 * 1000; // 10 min
-
+// ── Category helper (caching handled by central-api-client via Redis) ──
 async function getCategories() {
-  if (cachedCategories && Date.now() - categoryCacheTime < CATEGORY_CACHE_TTL) {
-    return cachedCategories;
-  }
   const { data } = await centralApi().get('/api/data/categories');
-  cachedCategories = data.categories;
-  categoryCacheTime = Date.now();
-  return cachedCategories;
+  return data.categories;
 }
 
 // ── P1: Health Check ──
-app.get('/status', (req, res) => {
-  res.json({ service: 'rental-service', status: 'OK' });
+app.get('/status', async (req, res) => {
+  const cacheStats = await getCacheStats();
+  res.json({ service: 'rental-service', status: 'OK', cache: cacheStats });
 });
 
 // ── P3 + P5: List products (proxy with category validation) ──

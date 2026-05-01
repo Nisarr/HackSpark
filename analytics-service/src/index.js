@@ -1,63 +1,17 @@
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
+const { centralApi, getCacheStats } = require('./central-api-client');
 
 const app = express();
 const PORT = process.env.PORT || 8003;
-const CENTRAL_API_URL = process.env.CENTRAL_API_URL;
-const CENTRAL_API_TOKEN = process.env.CENTRAL_API_TOKEN;
 
 app.use(cors());
 app.use(express.json());
 
-const centralApiClient = axios.create({
-  baseURL: CENTRAL_API_URL,
-  headers: { Authorization: `Bearer ${CENTRAL_API_TOKEN}` },
-  timeout: 10000,
-});
-
-centralApiClient.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const config = error.config;
-    if (!config) return Promise.reject(error);
-
-    config.retryCount = config.retryCount || 0;
-
-    if (error.response && error.response.status === 429) {
-      if (config.retryCount >= 3) {
-        const lastRetryAfter = error.response.data?.retryAfterSeconds || 60;
-        error.response.status = 503;
-        error.response.data = {
-          error: "Central API unavailable after 3 retries",
-          lastRetryAfter: lastRetryAfter,
-          suggestion: "Try again in ~2 minutes"
-        };
-        return Promise.reject(error);
-      }
-
-      const retryAfter = error.response.data?.retryAfterSeconds || 5;
-      const delay = retryAfter * Math.pow(2, config.retryCount);
-      const jitter = delay * 0.2 * (Math.random() * 2 - 1);
-      const finalDelayMs = Math.round((delay + jitter) * 1000);
-
-      config.retryCount += 1;
-      console.log(`[retry ${config.retryCount}/3] waiting ${Math.round(finalDelayMs/1000)}s before retrying ${config.method.toUpperCase()} ${config.url}`);
-      
-      await new Promise(resolve => setTimeout(resolve, finalDelayMs));
-      return centralApiClient(config);
-    }
-    return Promise.reject(error);
-  }
-);
-
-function centralApi() {
-  return centralApiClient;
-}
-
 // ── P1: Health Check ──
-app.get('/status', (req, res) => {
-  res.json({ service: 'analytics-service', status: 'OK' });
+app.get('/status', async (req, res) => {
+  const cacheStats = await getCacheStats();
+  res.json({ service: 'analytics-service', status: 'OK', cache: cacheStats });
 });
 
 // ── P11: Peak 7-day Sliding Window ──

@@ -40,6 +40,22 @@ services:
     networks:
       - rentpi-net
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rentpi-net
+
   # ── Application Services ────────────────────────────────────────────────────
 
   api-gateway:
@@ -108,8 +124,11 @@ services:
       CENTRAL_API_URL:   ${CENTRAL_API_URL}
       CENTRAL_API_TOKEN: ${CENTRAL_API_TOKEN}
       USER_SERVICE_URL:  http://user-service:8001
+      REDIS_URL:         redis://redis:6379
     depends_on:
       user-service:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8002/status || exit 1"]
@@ -130,6 +149,10 @@ services:
       PORT:              8003
       CENTRAL_API_URL:   ${CENTRAL_API_URL}
       CENTRAL_API_TOKEN: ${CENTRAL_API_TOKEN}
+      REDIS_URL:         redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8003/status || exit 1"]
       interval: 15s
@@ -144,7 +167,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "${AGENTIC_SERVICE_PORT:-8004}:8004"
+      - "${AGENTIC_SERVICE_PORT:-9004}:8004"
     environment:
       PORT:                  8004
       MONGO_URI:             ${MONGO_URI}
@@ -153,6 +176,7 @@ services:
       GEMINI_API_KEY:        ${GEMINI_API_KEY:-}
       ANALYTICS_SERVICE_URL: http://analytics-service:8003
       RENTAL_SERVICE_URL:    http://rental-service:8002
+      REDIS_URL:             redis://redis:6379
     depends_on:
       mongodb:
         condition: service_healthy
@@ -194,6 +218,7 @@ services:
 volumes:
   postgres_data:
   mongo_data:
+  redis_data:
 
 # ── Network ───────────────────────────────────────────────────────────────────
 networks:
