@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { api } from '../api';
+import { CalendarSearch, CheckCircle2, XCircle, Clock } from 'lucide-react';
 
 export default function Availability() {
   const [productId, setProductId] = useState('');
@@ -22,90 +23,145 @@ export default function Availability() {
   const daysDiff = from && to ? Math.ceil((new Date(to) - new Date(from)) / 86400000) : null;
 
   return (
-    <div className="fade-in">
-      <div className="page-header">
-        <h1 className="page-title">📅 Check Availability</h1>
-        <p className="page-subtitle">Check if a product is free for your desired rental period</p>
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="mb-8">
+        <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">Check Availability</h1>
+        <p className="text-slate-500 dark:text-slate-400 mt-2">Verify product availability for your desired rental dates.</p>
       </div>
 
-      <div className="card" style={{ maxWidth: 640, marginBottom: '1.5rem' }}>
-        <div className="card-title">🔍 Availability Lookup</div>
-        <form onSubmit={handleCheck}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">Product ID</label>
-              <input id="avail-product-id" className="form-input" type="number"
-                value={productId} onChange={e => setProductId(e.target.value)} placeholder="e.g. 42" required />
+      <div className="max-w-3xl">
+        <div className="glass rounded-2xl p-6 md:p-8 mb-8 border border-slate-200 dark:border-slate-700 shadow-sm">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2 bg-primary-100 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400 rounded-lg">
+              <CalendarSearch className="w-5 h-5" />
             </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">From Date</label>
-              <input id="avail-from" className="form-input" type="date" value={from}
-                onChange={e => setFrom(e.target.value)} required />
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">To Date</label>
-              <input id="avail-to" className="form-input" type="date" value={to}
-                onChange={e => setTo(e.target.value)} required />
-            </div>
-          </div>
-          {daysDiff !== null && daysDiff > 0 && (
-            <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
-              📆 Checking for <strong>{daysDiff} day{daysDiff !== 1 ? 's' : ''}</strong> rental period
-            </div>
-          )}
-          <button id="avail-check" className="btn btn-primary" disabled={loading} style={{ width: '100%' }}>
-            {loading ? '⏳ Checking...' : '🔍 Check Availability'}
-          </button>
-        </form>
-      </div>
-
-      {error && <div className="alert alert-error" style={{ maxWidth: 640 }}>⚠️ {error}</div>}
-
-      {result && (
-        <div className="card fade-in" style={{ maxWidth: 640 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
-            <div style={{ fontSize: '2.5rem' }}>{result.available ? '✅' : '❌'}</div>
-            <div>
-              <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>Product #{result.productId}</h2>
-              <span className={`badge ${result.available ? 'badge-success' : 'badge-danger'}`} style={{ fontSize: '.85rem' }}>
-                {result.available ? '✓ Available for your dates' : '✗ Not Available'}
-              </span>
-            </div>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Availability Lookup</h2>
           </div>
 
-          {result.busyPeriods?.length > 0 && (
-            <div style={{ marginBottom: '1rem' }}>
-              <h3 style={{ fontSize: '.9rem', color: 'var(--danger)', marginBottom: '.5rem', fontWeight: 600 }}>🔴 Busy Periods</h3>
-              <div className="period-list">
-                {result.busyPeriods.map((b, i) => (
-                  <div key={i} className="period-item">
-                    <span className="badge badge-danger">Busy</span>
-                    <span style={{ fontWeight: 500 }}>{b.start}</span>
-                    <span style={{ color: 'var(--text-secondary)' }}>→</span>
-                    <span style={{ fontWeight: 500 }}>{b.end}</span>
-                  </div>
-                ))}
+          <form onSubmit={handleCheck}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 uppercase tracking-wide">Product ID</label>
+                <input
+                  type="number"
+                  value={productId}
+                  onChange={e => setProductId(e.target.value)}
+                  placeholder="e.g. 42"
+                  required
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 uppercase tracking-wide">From Date</label>
+                <input
+                  type="date"
+                  value={from}
+                  onChange={e => setFrom(e.target.value)}
+                  required
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 uppercase tracking-wide">To Date</label>
+                <input
+                  type="date"
+                  value={to}
+                  onChange={e => setTo(e.target.value)}
+                  required
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
+                />
               </div>
             </div>
-          )}
 
-          {result.freeWindows?.length > 0 && (
-            <div>
-              <h3 style={{ fontSize: '.9rem', color: 'var(--success)', marginBottom: '.5rem', fontWeight: 600 }}>🟢 Free Windows</h3>
-              <div className="period-list">
-                {result.freeWindows.map((f, i) => (
-                  <div key={i} className="period-item">
-                    <span className="badge badge-success">Free</span>
-                    <span style={{ fontWeight: 500 }}>{f.start}</span>
-                    <span style={{ color: 'var(--text-secondary)' }}>→</span>
-                    <span style={{ fontWeight: 500 }}>{f.end}</span>
-                  </div>
-                ))}
+            {daysDiff !== null && daysDiff > 0 && (
+              <div className="mb-6 px-4 py-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-800 flex items-center gap-2 text-sm">
+                <Clock className="w-4 h-4" />
+                Checking availability for a <strong className="font-semibold">{daysDiff} day</strong> rental period.
               </div>
-            </div>
-          )}
+            )}
+
+            <button
+              disabled={loading}
+              className="w-full bg-primary-600 hover:bg-primary-700 text-white font-semibold py-3 px-6 rounded-xl shadow-md shadow-primary-500/20 transition-all disabled:opacity-50 flex justify-center items-center gap-2"
+            >
+              {loading ? (
+                <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> Checking...</>
+              ) : (
+                'Check Availability'
+              )}
+            </button>
+          </form>
         </div>
-      )}
+
+        {error && (
+          <div className="p-4 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800 flex items-center gap-3">
+            <XCircle className="w-5 h-5 shrink-0" />
+            <p className="text-sm font-medium">{error}</p>
+          </div>
+        )}
+
+        {result && (
+          <div className="glass rounded-2xl p-6 md:p-8 border border-slate-200 dark:border-slate-700 shadow-lg animate-in fade-in slide-in-from-bottom-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8 pb-6 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-4">
+                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white shadow-lg ${result.available ? 'bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-emerald-500/30' : 'bg-gradient-to-br from-red-400 to-red-600 shadow-red-500/30'}`}>
+                  {result.available ? <CheckCircle2 className="w-8 h-8" /> : <XCircle className="w-8 h-8" />}
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white">Product #{result.productId}</h2>
+                  <p className={`text-sm font-semibold mt-1 ${result.available ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {result.available ? '✓ Available for these dates' : '✗ Not Available'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Busy Periods */}
+              {result.busyPeriods?.length > 0 ? (
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-4 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                    Busy Periods
+                  </h3>
+                  <div className="space-y-3">
+                    {result.busyPeriods.map((b, i) => (
+                      <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 text-sm">
+                        <span className="px-2 py-1 rounded bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 font-semibold text-xs tracking-wide">BUSY</span>
+                        <span className="font-medium text-slate-700 dark:text-slate-300">{b.start}</span>
+                        <span className="text-slate-400">→</span>
+                        <span className="font-medium text-slate-700 dark:text-slate-300">{b.end}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm text-slate-500 dark:text-slate-400 italic">No busy periods recorded.</div>
+              )}
+
+              {/* Free Windows */}
+              {result.freeWindows?.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-4 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    Free Windows
+                  </h3>
+                  <div className="space-y-3">
+                    {result.freeWindows.map((f, i) => (
+                      <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-900/30 text-sm">
+                        <span className="px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 font-semibold text-xs tracking-wide">FREE</span>
+                        <span className="font-medium text-slate-700 dark:text-slate-300">{f.start}</span>
+                        <span className="text-slate-400">→</span>
+                        <span className="font-medium text-slate-700 dark:text-slate-300">{f.end}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
