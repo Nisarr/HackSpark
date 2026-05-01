@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
-import { Sun, Moon, Package, Calendar, TrendingUp, Tag, BarChart2, MessageSquare, LogOut, LogIn, Globe } from 'lucide-react';
+import { Sun, Moon, Package, Calendar, TrendingUp, Tag, BarChart2, MessageSquare, LogOut, LogIn, Globe, Activity } from 'lucide-react';
 import Home from './pages/Home';
+import Pulse from './pages/Pulse';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Products from './pages/Products';
@@ -20,6 +21,7 @@ const NAV_ITEMS = [
   { to: '/trending',     icon: TrendingUp, label: 'Trending' },
   { to: '/discount',     icon: Tag, label: 'Discounts' },
   { to: '/analytics',   icon: BarChart2, label: 'Analytics' },
+  { to: '/pulse',        icon: Activity, label: 'Pulse' },
   { to: '/chat',         icon: MessageSquare, label: 'AI Chat' },
 ];
 
@@ -137,6 +139,7 @@ export default function App() {
             <Route path="/trending"     element={<Trending />} />
             <Route path="/discount"     element={<Discount />} />
             <Route path="/analytics"    element={<Analytics />} />
+            <Route path="/pulse"        element={<Pulse />} />
           </Routes>
         </main>
       </div>
