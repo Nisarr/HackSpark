@@ -17,6 +17,24 @@ const SERVICES = {
 
 app.use(cors());
 
+// ── Global Rate Limiting (Max 30 req/min/token) ──
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30,
+  keyGenerator: (req) => {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      return authHeader.split(' ')[1];
+    }
+    return req.socket.remoteAddress || 'unknown';
+  },
+  validate: { xForwardedForHeader: false, default: true },
+  message: { error: 'Too many requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(globalLimiter);
+
 // ── P1: Aggregated Health Check ──
 app.get('/status', async (req, res) => {
   const downstream = {};
@@ -38,17 +56,6 @@ app.get('/status', async (req, res) => {
     downstream,
   });
 });
-
-// ── Global Rate Limiting (Max 20 req/min) ──
-const globalLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 20,
-  keyGenerator: () => 'global', // Apply limit globally across all IPs
-  message: { error: 'Too many requests, please try again later.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use(globalLimiter);
 
 // ── Proxy: /users/* → user-service ──
 app.use('/users', createProxyMiddleware({
