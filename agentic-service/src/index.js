@@ -62,6 +62,9 @@ if (GROQ_API_KEY) {
 // ── Central API client (shared Redis rate limiter + cache) ──
 const { centralApi, getCacheStats } = require('./central-api-client');
 
+// ── Tool Definitions for Agentic Data Fetching ──
+const { toolDefinitions, toolImplementations } = require('./tools');
+
 // ── P15: Topic guard ──
 const RENTPI_KEYWORDS = [
   'rental', 'rent', 'product', 'category', 'price', 'discount',
@@ -79,84 +82,8 @@ function isOnTopic(message) {
   return RENTPI_KEYWORDS.some(kw => lower.includes(kw));
 }
 
-// ── P15: Data grounding ──
-async function fetchGroundingData(message) {
-  const lower = message.toLowerCase();
-  let context = '';
-
-  try {
-    if (lower.includes('most rent') || lower.includes('stat') || lower.includes('total') || (lower.includes('category') && (lower.includes('most') || lower.includes('popular') || lower.includes('top')))) {
-      const { data } = await centralApi().get('/api/data/rentals/stats', { params: { group_by: 'category' } });
-      context += `Category rental stats: ${JSON.stringify(data.data)}\n`;
-    }
-
-    if (lower.includes('trending') || lower.includes('recommend') || lower.includes('season')) {
-      const today = new Date().toISOString().split('T')[0];
-      try {
-        const response = await new Promise((resolve, reject) => {
-          analyticsGrpcClient.GetRecommendations({ date: today, limit: 5 }, (err, response) => {
-            if (err) reject(err);
-            else resolve(response);
-          });
-        });
-        context += `Today's recommendations: ${JSON.stringify(response.recommendations)}\n`;
-      } catch (err) {
-        console.error('[agentic-service] gRPC grounding error:', err.message);
-      }
-    }
-
-    if (lower.includes('peak') || lower.includes('busiest') || lower.includes('rush')) {
-      const monthMatches = lower.match(/\d{4}-\d{2}/g);
-      if (monthMatches && monthMatches.length >= 1) {
-        const fromM = monthMatches[0];
-        const toM = monthMatches.length >= 2 ? monthMatches[1] : monthMatches[0];
-        try {
-          const { data } = await axios.get(`${ANALYTICS_URL}/analytics/peak-window`, { params: { from: fromM, to: toM }, timeout: 5000 });
-          context += `Peak window data: ${JSON.stringify(data)}\n`;
-        } catch { /* skip */ }
-      }
-    }
-
-    if (lower.includes('surge')) {
-      const monthMatch = lower.match(/(\d{4}-\d{2})/);
-      if (monthMatch) {
-        try {
-          const { data } = await axios.get(`${ANALYTICS_URL}/analytics/surge-days`, { params: { month: monthMatch[1] }, timeout: 5000 });
-          // Only pass days that actually have a surge to save LLM context, or pass all. We will pass all to allow answering 'is there a surge after X'.
-          context += `Surge data: ${JSON.stringify(data.data)}\n`;
-        } catch { /* skip */ }
-      }
-    }
-
-    if (lower.includes('available') || lower.includes('availability')) {
-      const pidMatch = lower.match(/product\s*#?\s*(\d+)/i);
-      const dateMatches = lower.match(/\d{4}-\d{2}-\d{2}/g);
-      if (pidMatch && dateMatches && dateMatches.length >= 2) {
-        try {
-          const { data } = await axios.get(`${RENTAL_URL}/rentals/products/${pidMatch[1]}/availability`, {
-            params: { from: dateMatches[0], to: dateMatches[1] }, timeout: 5000,
-          });
-          context += `Availability data: ${JSON.stringify(data)}\n`;
-        } catch { /* skip */ }
-      }
-    }
-
-    if (lower.includes('discount') || lower.includes('security score')) {
-      const userMatch = lower.match(/user\s*#?\s*(\d+)/i);
-      if (userMatch) {
-        try {
-          const { data } = await centralApi().get(`/api/data/users/${userMatch[1]}`);
-          context += `User data: ${JSON.stringify(data)}\n`;
-        } catch { /* skip */ }
-      }
-    }
-  } catch (err) {
-    if (err.response?.status === 503) throw err;
-    console.error('[agentic-service] grounding error:', err.message);
-  }
-
-  return context;
-}
+// ── P15: Data grounding (REPLACED BY TOOL CALLING) ──
+// Old fetchGroundingData function removed in favor of dynamic tools.
 
 // ── P1: Health Check ──
 app.get('/status', (req, res) => {
@@ -201,30 +128,66 @@ app.post('/chat', async (req, res) => {
     const history = await Message.find({ sessionId }).sort({ timestamp: 1 });
     const isNewSession = history.length === 0;
 
-    // P15: Fetch grounding data
-    const groundingContext = await fetchGroundingData(message);
-
-    // Build conversation for Groq LLaMA
+    // P15: Groq Tool Calling Loop
     const systemPrompt = `You are RentPi Assistant, a helpful AI for the RentPi rental marketplace platform. 
-Answer ONLY questions about RentPi: rentals, products, categories, pricing, availability, discounts, trends.
-Use the provided data context to answer accurately. NEVER invent numbers or data.
-If no data context is provided below, or if the data is empty, tell the user that the data is currently unavailable and you cannot answer that specific question right now. Never guess or make up numbers.
-Be concise and helpful.
+Answer questions about RentPi: rentals, products, categories, pricing, availability, discounts, trends.
+You have access to tools to fetch real-time data from the platform. ALWAYS use tools when asked about specific data, statistics, or availability.
+NEVER invent numbers or data. If a tool returns an error or no data, inform the user that the information is currently unavailable.
+Today's date is ${new Date().toISOString().split('T')[0]}.`;
 
-${groundingContext ? `DATA CONTEXT:\n${groundingContext}` : 'NO DATA CONTEXT AVAILABLE — do not guess, tell the user data is unavailable.'}`;
-
-    const groqMessages = [
+    let groqMessages = [
       { role: 'system', content: systemPrompt },
       ...history.map(m => ({ role: m.role, content: m.content })),
       { role: 'user', content: message }
     ];
 
-    const completion = await groq.chat.completions.create({
-      messages: groqMessages,
-      model: "llama-3.1-8b-instant",
-    });
+    let reply = '';
+    let toolCallCount = 0;
+    const MAX_TOOL_CALLS = 5;
 
-    const reply = completion.choices[0]?.message?.content || "Sorry, I couldn't generate a response.";
+    while (toolCallCount < MAX_TOOL_CALLS) {
+      const completion = await groq.chat.completions.create({
+        messages: groqMessages,
+        model: "llama-3.1-8b-instant",
+        tools: toolDefinitions,
+        tool_choice: "auto",
+      });
+
+      const responseMessage = completion.choices[0].message;
+      groqMessages.push(responseMessage);
+
+      if (!responseMessage.tool_calls || responseMessage.tool_calls.length === 0) {
+        reply = responseMessage.content;
+        break;
+      }
+
+      // Execute tool calls
+      for (const toolCall of responseMessage.tool_calls) {
+        const functionName = toolCall.function.name;
+        const functionArgs = JSON.parse(toolCall.function.arguments);
+        
+        console.log(`[agentic-service] Calling tool: ${functionName}`, functionArgs);
+        
+        const implementation = toolImplementations[functionName];
+        let toolResult;
+        if (implementation) {
+          toolResult = await implementation(functionArgs);
+        } else {
+          toolResult = { error: `Tool ${functionName} not implemented` };
+        }
+
+        groqMessages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          name: functionName,
+          content: JSON.stringify(toolResult),
+        });
+      }
+
+      toolCallCount++;
+    }
+
+    if (!reply) reply = "I'm sorry, I encountered an issue while processing your request.";
 
     // Save messages to MongoDB
     await Message.create({ sessionId, role: 'user', content: message });
