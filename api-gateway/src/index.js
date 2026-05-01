@@ -187,6 +187,15 @@ async function cachedProxyHandler(req, res) {
 
     try {
       const result = await fetchPromise;
+      // Forward rate limit info to frontend
+      if (result.status === 429 || result.status === 503) {
+        const retryAfter = result.data?.retryAfterSeconds || result.data?.lastRetryAfter || 60;
+        res.set('Retry-After', String(retryAfter));
+        return res.status(503).json({
+          error: 'Rate limit exceeded — please wait',
+          retryAfterSeconds: retryAfter,
+        });
+      }
       res.set('X-Cache', 'MISS');
       return res.status(result.status).json(result.data);
     } catch (err) {
@@ -225,6 +234,15 @@ async function cachedProxyHandler(req, res) {
       invalidateCache('/users/');
     }
 
+    // Forward rate limit info to frontend
+    if (response.status === 429 || response.status === 503) {
+      const retryAfter = response.data?.retryAfterSeconds || response.data?.lastRetryAfter || 60;
+      res.set('Retry-After', String(retryAfter));
+      return res.status(503).json({
+        error: 'Rate limit exceeded — please wait',
+        retryAfterSeconds: retryAfter,
+      });
+    }
     return res.status(response.status).json(response.data);
   } catch (err) {
     console.error(`[cache-proxy] ${method} ${fullUrl} error:`, err.message);

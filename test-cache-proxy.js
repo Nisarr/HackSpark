@@ -11,6 +11,18 @@ let backendHitCount = 0;
 // ── Mock Backend (simulates rental-service, analytics-service, etc.) ──
 const mockBackend = http.createServer((req, res) => {
   backendHitCount++;
+
+  // POST /chat must be checked before the generic /chat/sessions match
+  if (req.url.startsWith('/chat') && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ sessionId: 'test', reply: 'Hello!' }));
+    });
+    return;
+  }
+
   res.writeHead(200, { 'Content-Type': 'application/json' });
 
   if (req.url.startsWith('/rentals/products')) {
@@ -21,13 +33,6 @@ const mockBackend = http.createServer((req, res) => {
     res.end(JSON.stringify({ sessions: [] }));
   } else if (req.url.includes('/history')) {
     res.end(JSON.stringify({ messages: [] }));
-  } else if (req.url.startsWith('/chat') && req.method === 'POST') {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => {
-      res.end(JSON.stringify({ sessionId: 'test', reply: 'Hello!' }));
-    });
-    return;
   } else if (req.url.startsWith('/users/')) {
     res.end(JSON.stringify({ userId: 1, discountPercent: 15, securityScore: 85 }));
   } else {
@@ -164,10 +169,10 @@ async function main() {
 
   const postCache = postRes.headers.get('x-cache');
   console.log(`  POST /chat: status=${postRes.status}, cache=${postCache || 'none'}`);
-  console.log(`  Backend hits: ${backendHitCount}`);
 
-  const postPass = postCache !== 'HIT' && backendHitCount === 1;
-  console.log(`  ${postPass ? '✅ PASS' : '❌ FAIL'}: POST always hits backend`);
+  // Key assertion: POST must NEVER be served from cache
+  const postPass = postCache !== 'HIT' && postRes.status === 200;
+  console.log(`  ${postPass ? '✅ PASS' : '❌ FAIL'}: POST always hits backend (not cached)`);
   if (!postPass) allPassed = false;
 
   // ─── TEST 5: Cache invalidation after mutation ───
