@@ -1,0 +1,76 @@
+// RentPi Database Schema (DBML)
+// Use this at https://dbdiagram.io
+
+Project RentPi {
+  database_type: 'PostgreSQL & MongoDB'
+  Note: 'HackSpark 2026 Microservice Architecture'
+}
+
+// ── PostgreSQL: User Service ──────────────────────────────────────────────────
+Table users {
+  id integer [primary key, increment]
+  name varchar(255) [not null]
+  email varchar(255) [unique, not null]
+  password_hash varchar(255) [not null]
+  created_at timestamp [default: `now()`]
+  
+  Note: "Stores local user authentication data"
+}
+
+// ── MongoDB: Agentic Service (NoSQL) ──────────────────────────────────────────
+Table sessions {
+  sessionId varchar [primary key, unique]
+  name varchar
+  createdAt timestamp [default: `now()`]
+  lastMessageAt timestamp [default: `now()`]
+  
+  Note: "Chat sessions stored in MongoDB"
+}
+
+Table messages {
+  id integer [primary key] // MongoDB _id
+  sessionId varchar [ref: > sessions.sessionId]
+  role varchar // enum: 'user', 'assistant'
+  content text
+  timestamp timestamp [default: `now()`]
+  
+  Note: "Conversation history for each session"
+}
+
+// ── Central API (Read-Only External Data) ─────────────────────────────────────
+Table external_users {
+  id integer [primary key]
+  name varchar
+  email varchar
+  securityScore integer
+  
+  Note: "Fetched from Central API"
+}
+
+Table external_products {
+  id integer [primary key]
+  name varchar
+  category varchar
+  pricePerDay decimal
+  ownerId integer
+  
+  Note: "Product catalog from Central API"
+}
+
+Table external_rentals {
+  id integer [primary key]
+  productId integer [ref: > external_products.id]
+  ownerId integer
+  renterId integer [ref: > external_users.id]
+  rentalStart timestamp
+  rentalEnd timestamp
+  discountPercent integer
+  
+  Note: "Rental transactions from Central API"
+}
+
+Table categories {
+  name varchar [primary key]
+  
+  Note: "List of valid product categories"
+}
