@@ -10,12 +10,49 @@ const CENTRAL_API_TOKEN = process.env.CENTRAL_API_TOKEN;
 app.use(cors());
 app.use(express.json());
 
+const centralApiClient = axios.create({
+  baseURL: CENTRAL_API_URL,
+  headers: { Authorization: `Bearer ${CENTRAL_API_TOKEN}` },
+  timeout: 10000,
+});
+
+centralApiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const config = error.config;
+    if (!config) return Promise.reject(error);
+
+    config.retryCount = config.retryCount || 0;
+
+    if (error.response && error.response.status === 429) {
+      if (config.retryCount >= 3) {
+        const lastRetryAfter = error.response.data?.retryAfterSeconds || 60;
+        error.response.status = 503;
+        error.response.data = {
+          error: "Central API unavailable after 3 retries",
+          lastRetryAfter: lastRetryAfter,
+          suggestion: "Try again in ~2 minutes"
+        };
+        return Promise.reject(error);
+      }
+
+      const retryAfter = error.response.data?.retryAfterSeconds || 5;
+      const delay = retryAfter * Math.pow(2, config.retryCount);
+      const jitter = delay * 0.2 * (Math.random() * 2 - 1);
+      const finalDelayMs = Math.round((delay + jitter) * 1000);
+
+      config.retryCount += 1;
+      console.log(`[retry ${config.retryCount}/3] waiting ${Math.round(finalDelayMs/1000)}s before retrying ${config.method.toUpperCase()} ${config.url}`);
+      
+      await new Promise(resolve => setTimeout(resolve, finalDelayMs));
+      return centralApiClient(config);
+    }
+    return Promise.reject(error);
+  }
+);
+
 function centralApi() {
-  return axios.create({
-    baseURL: CENTRAL_API_URL,
-    headers: { Authorization: `Bearer ${CENTRAL_API_TOKEN}` },
-    timeout: 10000,
-  });
+  return centralApiClient;
 }
 
 // ── P1: Health Check ──
@@ -47,7 +84,9 @@ app.get('/analytics/peak-window', async (req, res) => {
           params: { group_by: 'date', month },
         });
         for (const d of data.data) dailyMap[d.date] = d.count;
-      } catch { /* skip */ }
+      } catch (err) {
+        if (err.response?.status === 503) throw err;
+      }
       cm++;
       if (cm > 12) { cm = 1; cy++; }
     }
@@ -93,6 +132,7 @@ app.get('/analytics/peak-window', async (req, res) => {
       },
     });
   } catch (err) {
+    if (err.response?.status === 503) return res.status(503).json(err.response.data);
     console.error('[analytics-service] peak-window error:', err.message);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -152,25 +192,16 @@ app.get('/analytics/surge-days', async (req, res) => {
 
     res.json({ month, data: result });
   } catch (err) {
+    if (err.response?.status === 503) return res.status(503).json(err.response.data);
     console.error('[analytics-service] surge-days error:', err.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // ── P14: Seasonal Recommendations ──
-app.get('/analytics/recommendations', async (req, res) => {
-  try {
-    const { date, limit: limitStr } = req.query;
-    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return res.status(400).json({ error: 'date must be a valid YYYY-MM-DD string' });
-    }
-    const limitNum = parseInt(limitStr) || 10;
-    if (limitNum < 1 || limitNum > 50) {
-      return res.status(400).json({ error: 'limit must be 1-50' });
-    }
-
-    const targetDate = new Date(date);
-    const year = targetDate.getFullYear();
+async function fetchRecommendations(date, limitNum) {
+  const targetDate = new Date(date);
+  const year = targetDate.getFullYear();
 
     // Build 15-day windows (7 days before and after) for past 2 years
     const windows = [];
@@ -201,14 +232,15 @@ app.get('/analytics/recommendations', async (req, res) => {
           }
           hasMore = data.data.length === 100;
           page++;
-        } catch {
+        } catch (err) {
+          if (err.response?.status === 503) throw err;
           hasMore = false;
         }
       }
     }
 
     if (Object.keys(productScores).length === 0) {
-      return res.json({ date, recommendations: [] });
+      return [];
     }
 
     // Sort by score descending, take top limit
@@ -227,18 +259,36 @@ app.get('/analytics/recommendations', async (req, res) => {
           params: { ids: batch.join(',') },
         });
         for (const p of data.data) productMap[p.id] = p;
-      } catch { /* skip */ }
+      } catch (err) {
+        if (err.response?.status === 503) throw err;
+      }
     }
 
-    const recommendations = sorted.map(s => ({
-      productId: s.productId,
-      name: productMap[s.productId]?.name || `Product #${s.productId}`,
-      category: productMap[s.productId]?.category || 'UNKNOWN',
-      score: s.score,
-    }));
+  const recommendations = sorted.map(s => ({
+    productId: s.productId,
+    name: productMap[s.productId]?.name || `Product #${s.productId}`,
+    category: productMap[s.productId]?.category || 'UNKNOWN',
+    score: s.score,
+  }));
 
+  return recommendations;
+}
+
+app.get('/analytics/recommendations', async (req, res) => {
+  try {
+    const { date, limit: limitStr } = req.query;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'date must be a valid YYYY-MM-DD string' });
+    }
+    const limitNum = parseInt(limitStr) || 10;
+    if (limitNum < 1 || limitNum > 50) {
+      return res.status(400).json({ error: 'limit must be 1-50' });
+    }
+
+    const recommendations = await fetchRecommendations(date, limitNum);
     res.json({ date, recommendations });
   } catch (err) {
+    if (err.response?.status === 503) return res.status(503).json(err.response.data);
     console.error('[analytics-service] recommendations error:', err.message);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -246,4 +296,45 @@ app.get('/analytics/recommendations', async (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[analytics-service] listening on port ${PORT}`);
+});
+
+// ── B1: gRPC Server ──
+const grpc = require('@grpc/grpc-js');
+const protoLoader = require('@grpc/proto-loader');
+const path = require('path');
+
+const PROTO_PATH = path.join(__dirname, 'proto', 'analytics.proto');
+const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
+  keepCase: true, longs: String, enums: String, defaults: true, oneofs: true
+});
+const analyticsProto = grpc.loadPackageDefinition(packageDefinition).analytics;
+
+function getRecommendationsGrpc(call, callback) {
+  const { date, limit } = call.request;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'Invalid date format' });
+  }
+  const limitNum = limit || 10;
+  
+  fetchRecommendations(date, limitNum)
+    .then(recommendations => {
+      callback(null, { date, recommendations });
+    })
+    .catch(err => {
+      console.error('[analytics-service] gRPC error:', err.message);
+      callback({ code: grpc.status.INTERNAL, message: 'Internal server error' });
+    });
+}
+
+const grpcServer = new grpc.Server();
+grpcServer.addService(analyticsProto.AnalyticsService.service, {
+  GetRecommendations: getRecommendationsGrpc
+});
+
+grpcServer.bindAsync('0.0.0.0:50051', grpc.ServerCredentials.createInsecure(), (err, port) => {
+  if (err) {
+    console.error('[analytics-service] gRPC bind error:', err);
+    return;
+  }
+  console.log(`[analytics-service] gRPC listening on port ${port}`);
 });

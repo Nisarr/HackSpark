@@ -30,12 +30,49 @@ async function initDB() {
 }
 initDB().catch(err => console.error('[user-service] DB init error:', err.message));
 
+const centralApiClient = axios.create({
+  baseURL: CENTRAL_API_URL,
+  headers: { Authorization: `Bearer ${CENTRAL_API_TOKEN}` },
+  timeout: 10000,
+});
+
+centralApiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const config = error.config;
+    if (!config) return Promise.reject(error);
+
+    config.retryCount = config.retryCount || 0;
+
+    if (error.response && error.response.status === 429) {
+      if (config.retryCount >= 3) {
+        const lastRetryAfter = error.response.data?.retryAfterSeconds || 60;
+        error.response.status = 503;
+        error.response.data = {
+          error: "Central API unavailable after 3 retries",
+          lastRetryAfter: lastRetryAfter,
+          suggestion: "Try again in ~2 minutes"
+        };
+        return Promise.reject(error);
+      }
+
+      const retryAfter = error.response.data?.retryAfterSeconds || 5;
+      const delay = retryAfter * Math.pow(2, config.retryCount);
+      const jitter = delay * 0.2 * (Math.random() * 2 - 1);
+      const finalDelayMs = Math.round((delay + jitter) * 1000);
+
+      config.retryCount += 1;
+      console.log(`[retry ${config.retryCount}/3] waiting ${Math.round(finalDelayMs/1000)}s before retrying ${config.method.toUpperCase()} ${config.url}`);
+      
+      await new Promise(resolve => setTimeout(resolve, finalDelayMs));
+      return centralApiClient(config);
+    }
+    return Promise.reject(error);
+  }
+);
+
 function centralApi() {
-  return axios.create({
-    baseURL: CENTRAL_API_URL,
-    headers: { Authorization: `Bearer ${CENTRAL_API_TOKEN}` },
-    timeout: 10000,
-  });
+  return centralApiClient;
 }
 
 function authMiddleware(req, res, next) {
@@ -92,6 +129,7 @@ app.get('/users/:id/discount', async (req, res) => {
     const discountPercent = s >= 80 ? 20 : s >= 60 ? 15 : s >= 40 ? 10 : s >= 20 ? 5 : 0;
     res.json({ userId, securityScore: s, discountPercent });
   } catch (err) {
+    if (err.response?.status === 503) return res.status(503).json(err.response.data);
     if (err.response?.status === 404) return res.status(404).json({ error: 'User not found' });
     console.error(err.message); res.status(500).json({ error: 'Internal server error' });
   }

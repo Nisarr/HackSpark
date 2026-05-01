@@ -11,12 +11,49 @@ app.use(cors());
 app.use(express.json());
 
 // ── Central API client ──
+const centralApiClient = axios.create({
+  baseURL: CENTRAL_API_URL,
+  headers: { Authorization: `Bearer ${CENTRAL_API_TOKEN}` },
+  timeout: 10000,
+});
+
+centralApiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const config = error.config;
+    if (!config) return Promise.reject(error);
+
+    config.retryCount = config.retryCount || 0;
+
+    if (error.response && error.response.status === 429) {
+      if (config.retryCount >= 3) {
+        const lastRetryAfter = error.response.data?.retryAfterSeconds || 60;
+        error.response.status = 503;
+        error.response.data = {
+          error: "Central API unavailable after 3 retries",
+          lastRetryAfter: lastRetryAfter,
+          suggestion: "Try again in ~2 minutes"
+        };
+        return Promise.reject(error);
+      }
+
+      const retryAfter = error.response.data?.retryAfterSeconds || 5;
+      const delay = retryAfter * Math.pow(2, config.retryCount);
+      const jitter = delay * 0.2 * (Math.random() * 2 - 1);
+      const finalDelayMs = Math.round((delay + jitter) * 1000);
+
+      config.retryCount += 1;
+      console.log(`[retry ${config.retryCount}/3] waiting ${Math.round(finalDelayMs/1000)}s before retrying ${config.method.toUpperCase()} ${config.url}`);
+      
+      await new Promise(resolve => setTimeout(resolve, finalDelayMs));
+      return centralApiClient(config);
+    }
+    return Promise.reject(error);
+  }
+);
+
 function centralApi() {
-  return axios.create({
-    baseURL: CENTRAL_API_URL,
-    headers: { Authorization: `Bearer ${CENTRAL_API_TOKEN}` },
-    timeout: 10000,
-  });
+  return centralApiClient;
 }
 
 // ── Category cache (P5) ──
@@ -217,7 +254,9 @@ app.get('/rentals/kth-busiest-date', async (req, res) => {
           params: { group_by: 'date', month },
         });
         allDates.push(...data.data);
-      } catch { /* skip months with no data */ }
+      } catch (err) {
+        if (err.response?.status === 503) throw err;
+      }
       cm++;
       if (cm > 12) { cm = 1; cy++; }
     }
@@ -519,7 +558,8 @@ app.get('/rentals/merged-feed', async (req, res) => {
             params: { product_id: pid, page: 1, limit: 100 },
           });
           return data.data.map(r => ({ ...r, productId: pid }));
-        } catch {
+        } catch (err) {
+          if (err.response?.status === 503) throw err;
           return [];
         }
       })

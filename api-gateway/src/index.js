@@ -16,7 +16,6 @@ const SERVICES = {
 };
 
 app.use(cors());
-app.use(express.json());
 
 // ── P1: Aggregated Health Check ──
 app.get('/status', async (req, res) => {

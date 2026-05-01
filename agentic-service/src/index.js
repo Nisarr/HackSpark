@@ -4,6 +4,9 @@ const mongoose = require('mongoose');
 const axios = require('axios');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { v4: uuidv4 } = require('uuid');
+const grpc = require('@grpc/grpc-js');
+const protoLoader = require('@grpc/proto-loader');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 8004;
@@ -13,9 +16,21 @@ const CENTRAL_API_TOKEN = process.env.CENTRAL_API_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ANALYTICS_URL = process.env.ANALYTICS_SERVICE_URL || 'http://analytics-service:8003';
 const RENTAL_URL = process.env.RENTAL_SERVICE_URL || 'http://rental-service:8002';
+const ANALYTICS_GRPC_URL = process.env.ANALYTICS_GRPC_URL || 'analytics-service:50051';
 
 app.use(cors());
 app.use(express.json());
+
+// ── B1: gRPC Client ──
+const PROTO_PATH = path.join(__dirname, 'proto', 'analytics.proto');
+const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
+  keepCase: true, longs: String, enums: String, defaults: true, oneofs: true
+});
+const analyticsProto = grpc.loadPackageDefinition(packageDefinition).analytics;
+const analyticsGrpcClient = new analyticsProto.AnalyticsService(
+  ANALYTICS_GRPC_URL,
+  grpc.credentials.createInsecure()
+);
 
 // ── MongoDB schemas (P16) ──
 const sessionSchema = new mongoose.Schema({
@@ -48,12 +63,49 @@ if (GEMINI_API_KEY) {
 }
 
 // ── Central API client ──
+const centralApiClient = axios.create({
+  baseURL: CENTRAL_API_URL,
+  headers: { Authorization: `Bearer ${CENTRAL_API_TOKEN}` },
+  timeout: 10000,
+});
+
+centralApiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const config = error.config;
+    if (!config) return Promise.reject(error);
+
+    config.retryCount = config.retryCount || 0;
+
+    if (error.response && error.response.status === 429) {
+      if (config.retryCount >= 3) {
+        const lastRetryAfter = error.response.data?.retryAfterSeconds || 60;
+        error.response.status = 503;
+        error.response.data = {
+          error: "Central API unavailable after 3 retries",
+          lastRetryAfter: lastRetryAfter,
+          suggestion: "Try again in ~2 minutes"
+        };
+        return Promise.reject(error);
+      }
+
+      const retryAfter = error.response.data?.retryAfterSeconds || 5;
+      const delay = retryAfter * Math.pow(2, config.retryCount);
+      const jitter = delay * 0.2 * (Math.random() * 2 - 1);
+      const finalDelayMs = Math.round((delay + jitter) * 1000);
+
+      config.retryCount += 1;
+      console.log(`[retry ${config.retryCount}/3] waiting ${Math.round(finalDelayMs/1000)}s before retrying ${config.method.toUpperCase()} ${config.url}`);
+      
+      await new Promise(resolve => setTimeout(resolve, finalDelayMs));
+      return centralApiClient(config);
+    }
+    return Promise.reject(error);
+  }
+);
+
 function centralApi() {
-  return axios.create({
-    baseURL: CENTRAL_API_URL,
-    headers: { Authorization: `Bearer ${CENTRAL_API_TOKEN}` },
-    timeout: 10000,
-  });
+  return centralApiClient;
 }
 
 // ── P15: Topic guard ──
@@ -85,9 +137,16 @@ async function fetchGroundingData(message) {
     if (lower.includes('trending') || lower.includes('recommend') || lower.includes('season')) {
       const today = new Date().toISOString().split('T')[0];
       try {
-        const { data } = await axios.get(`${ANALYTICS_URL}/analytics/recommendations`, { params: { date: today, limit: 5 }, timeout: 5000 });
-        context += `Today's recommendations: ${JSON.stringify(data.recommendations)}\n`;
-      } catch { /* analytics might not be ready */ }
+        const response = await new Promise((resolve, reject) => {
+          analyticsGrpcClient.GetRecommendations({ date: today, limit: 5 }, (err, response) => {
+            if (err) reject(err);
+            else resolve(response);
+          });
+        });
+        context += `Today's recommendations: ${JSON.stringify(response.recommendations)}\n`;
+      } catch (err) {
+        console.error('[agentic-service] gRPC grounding error:', err.message);
+      }
     }
 
     if (lower.includes('peak') || lower.includes('busiest') || lower.includes('rush')) {
@@ -133,6 +192,7 @@ async function fetchGroundingData(message) {
       }
     }
   } catch (err) {
+    if (err.response?.status === 503) throw err;
     console.error('[agentic-service] grounding error:', err.message);
   }
 
@@ -198,9 +258,13 @@ ${groundingContext ? `DATA CONTEXT:\n${groundingContext}` : ''}`;
       parts: [{ text: m.content }],
     }));
 
-    const chat = model.startChat({
-      history: chatHistory,
+    const chatModel = genAI.getGenerativeModel({
+      model: 'gemini-2.0-flash',
       systemInstruction: systemPrompt,
+    });
+
+    const chat = chatModel.startChat({
+      history: chatHistory,
     });
 
     const result = await chat.sendMessage(message);
@@ -234,6 +298,7 @@ ${groundingContext ? `DATA CONTEXT:\n${groundingContext}` : ''}`;
 
     res.json({ sessionId, reply });
   } catch (err) {
+    if (err.response?.status === 503) return res.status(503).json(err.response.data);
     console.error('[agentic-service] chat error:', err.message);
     res.status(500).json({ error: 'Internal server error' });
   }
