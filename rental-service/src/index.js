@@ -117,6 +117,18 @@ app.get('/rentals/products/:id/availability', async (req, res) => {
       page++;
     }
 
+    // Early exit if no rentals exist
+    if (allRentals.length === 0) {
+      return res.json({
+        productId,
+        from,
+        to,
+        available: true,
+        busyPeriods: [],
+        freeWindows: [{ start: from, end: to }],
+      });
+    }
+
     // Build intervals and merge overlapping ones
     const intervals = allRentals.map(r => ({
       start: new Date(r.rentalStart),
@@ -160,8 +172,7 @@ app.get('/rentals/products/:id/availability', async (req, res) => {
       });
     }
 
-    const available = busyPeriods.length === 0 ||
-      busyPeriods.every(b => b.end < reqFrom || b.start > reqTo);
+    const available = busyPeriods.length === 0;
 
     res.json({
       productId,
@@ -506,10 +517,17 @@ app.get('/rentals/merged-feed', async (req, res) => {
       return res.status(400).json({ error: 'productIds is required' });
     }
 
-    const productIds = [...new Set(pidsStr.split(',').map(Number).filter(n => !isNaN(n)))];
-    if (productIds.length < 1 || productIds.length > 10) {
+    const parts = pidsStr.split(',');
+    if (parts.length < 1 || parts.length > 10) {
       return res.status(400).json({ error: 'productIds must be 1-10 comma-separated integers' });
     }
+    
+    const parsed = parts.map(Number);
+    if (parsed.some(n => isNaN(n) || !Number.isInteger(n))) {
+      return res.status(400).json({ error: 'productIds must be 1-10 comma-separated integers' });
+    }
+
+    const productIds = [...new Set(parsed)];
 
     const limit = parseInt(limitStr) || 30;
     if (limit < 1 || limit > 100) {

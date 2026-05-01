@@ -7,7 +7,6 @@
     "dev": "node --watch src/index.js"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.21.0",
     "@grpc/grpc-js": "^1.14.3",
     "@grpc/proto-loader": "^0.8.0",
     "axios": "^1.7.0",
