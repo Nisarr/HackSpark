@@ -316,6 +316,9 @@ app.get('/rentals/kth-busiest-date', async (req, res) => {
 app.get('/rentals/users/:id/top-categories', async (req, res) => {
   try {
     const userId = parseInt(req.params.id);
+    if (isNaN(userId) || userId < 1) {
+      return res.status(400).json({ error: 'Invalid user ID' });
+    }
     const kNum = parseInt(req.query.k);
     if (isNaN(kNum) || kNum < 1) {
       return res.status(400).json({ error: 'k must be a positive integer' });
@@ -357,53 +360,29 @@ app.get('/rentals/users/:id/top-categories', async (req, res) => {
     const categoryCounts = {};
     for (const rental of allRentals) {
       const product = productMap[rental.productId];
-      if (product) {
-        categoryCounts[product.category] = (categoryCounts[product.category] || 0) + 1;
+      if (!product) {
+        console.warn(`[P9] Product ${rental.productId} not found for user ${userId}`);
+        continue;
       }
+      categoryCounts[product.category] = (categoryCounts[product.category] || 0) + 1;
     }
 
     // Min-heap to find top k categories
     const entries = Object.entries(categoryCounts).map(([category, rentalCount]) => ({ category, rentalCount }));
 
-    // Use min-heap of size k
-    const heap = [];
-    function push(val) {
-      heap.push(val);
-      let i = heap.length - 1;
-      while (i > 0) {
-        const p = Math.floor((i - 1) / 2);
-        if (heap[p].rentalCount <= heap[i].rentalCount) break;
-        [heap[p], heap[i]] = [heap[i], heap[p]];
-        i = p;
-      }
-    }
-    function pop() {
-      const top = heap[0];
-      const last = heap.pop();
-      if (heap.length > 0) {
-        heap[0] = last;
-        let i = 0;
-        while (true) {
-          let s = i, l = 2*i+1, r = 2*i+2;
-          if (l < heap.length && heap[l].rentalCount < heap[s].rentalCount) s = l;
-          if (r < heap.length && heap[r].rentalCount < heap[s].rentalCount) s = r;
-          if (s === i) break;
-          [heap[i], heap[s]] = [heap[s], heap[i]];
-          i = s;
-        }
-      }
-      return top;
-    }
+    // Use MinHeap from module level
+    const heap = new MinHeap((a, b) => a.rentalCount - b.rentalCount);
 
     for (const entry of entries) {
-      push(entry);
-      if (heap.length > kNum) pop();
+      heap.push(entry);
+      if (heap.size() > kNum) heap.pop();
     }
 
-    // Extract and sort descending
+    // Pop in reverse order directly (already in descending order, no sort needed)
     const topCategories = [];
-    while (heap.length > 0) topCategories.push(pop());
-    topCategories.sort((a, b) => b.rentalCount - a.rentalCount);
+    while (heap.size() > 0) {
+      topCategories.unshift(heap.pop());
+    }
 
     res.json({ userId, topCategories });
   } catch (err) {
