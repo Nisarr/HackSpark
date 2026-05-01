@@ -44,22 +44,30 @@ app.post('/users/register', async (req, res) => {
     const { name, email, password } = req.body;
     if (!name || !email || !password) return res.status(400).json({ error: 'name, email, password required' });
     
-    const { data, error } = await supabase.auth.signUp({
+    // Use admin API to create user with auto-confirmed email (bypasses Supabase email rate limit)
+    const { data: createData, error: createError } = await supabase.auth.admin.createUser({
       email,
       password,
-      options: { data: { name } }
+      email_confirm: true,
+      user_metadata: { name },
     });
 
-    if (error) {
-      if (error.status === 422 || error.message.toLowerCase().includes('already registered')) {
+    if (createError) {
+      if (createError.status === 422 || createError.message?.toLowerCase().includes('already registered') || createError.message?.toLowerCase().includes('already been registered')) {
         return res.status(409).json({ error: 'Email already registered' });
       }
-      return res.status(400).json({ error: error.message });
+      if (createError.status === 429) {
+        return res.status(429).json({ error: 'Too many signup attempts. Please try again later.' });
+      }
+      return res.status(400).json({ error: createError.message });
     }
 
-    const token = data.session?.access_token || null;
+    // Now sign them in to get a session token
+    const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+
+    const token = loginData?.session?.access_token || null;
     res.status(201).json({ 
-      user: { id: data.user.id, name: data.user.user_metadata?.name || name, email: data.user.email, created_at: data.user.created_at },
+      user: { id: createData.user.id, name: createData.user.user_metadata?.name || name, email: createData.user.email, created_at: createData.user.created_at },
       token 
     });
   } catch (err) { console.error('[user-service] Register error:', err.message); res.status(500).json({ error: 'Internal server error' }); }
