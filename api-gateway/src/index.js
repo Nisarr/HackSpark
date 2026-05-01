@@ -49,8 +49,14 @@ const CACHE_TTL_RULES = [
   { pattern: /^GET:\/rentals\/products\?/,       ttl: 120 },  // product listing
   { pattern: /^GET:\/rentals\/products$/,         ttl: 120 },  // product listing (no query)
   { pattern: /^GET:\/rentals\/products\/\d+\/availability/, ttl: 60 },
+  { pattern: /^GET:\/rentals\/products\/\d+\/free-streak/, ttl: 120 },
+  { pattern: /^GET:\/rentals\/products\/\d+$/,    ttl: 120 },  // single product
+  { pattern: /^GET:\/rentals\/kth-busiest/,       ttl: 180 },  // analytics-like
+  { pattern: /^GET:\/rentals\/users\/\d+\/top-categories/, ttl: 120 },
+  { pattern: /^GET:\/rentals\/merged-feed/,       ttl: 60  },  // merged feed
+  { pattern: /^GET:\/rentals\/kpi/,               ttl: 120 },  // KPI dashboard
   { pattern: /^GET:\/analytics\//,                ttl: 180 },  // analytics endpoints
-  { pattern: /^GET:\/users\/\d+\/discount/,       ttl: 120 },  // discount lookup
+  { pattern: /^GET:\/users\/.*\/discount/,        ttl: 120 },  // discount lookup
   { pattern: /^GET:\/chat\/sessions/,             ttl: 30  },  // session list
   { pattern: /^GET:\/chat\/[^\/]+\/history/,      ttl: 15  },  // chat history
 ];
@@ -103,13 +109,13 @@ const inflightRequests = new Map();
 let cacheHits = 0;
 let cacheMisses = 0;
 
-// Periodic cache cleanup (every 5 minutes)
+// Periodic cache cleanup (every 60 seconds)
 setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of cache.entries()) {
     if (now > entry.expiresAt) cache.delete(key);
   }
-}, 5 * 60 * 1000);
+}, 60 * 1000);
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Cached Proxy Handler ──
@@ -171,7 +177,7 @@ async function cachedProxyHandler(req, res) {
         ...filterHeaders(req.headers),
         host: undefined,
       },
-      timeout: 15000,
+      timeout: 10000,
       validateStatus: () => true, // Don't throw on non-2xx
     }).then(response => {
       // Cache successful responses
@@ -311,6 +317,7 @@ app.all('/chat/*', cachedProxyHandler);
 
 const WARM_ENDPOINTS = [
   '/rentals/products?page=1&limit=20',
+  '/rentals/kpi',
 ];
 
 async function warmCache() {

@@ -1,9 +1,11 @@
 /**
- * Central API Client with Redis Cache + Rate Limiting
+ * Central API Client with Redis Cache + Rate Limiting (Optimized)
  * 
  * Features:
+ *   - L1 in-memory cache + L2 Redis cache (two-tier)
  *   - Redis-backed token bucket rate limiter (20 req/min, shared across all services)
- *   - Response caching in Redis with per-endpoint TTL
+ *   - Request coalescing (dedup concurrent identical GETs)
+ *   - Non-blocking cache writes (fire-and-forget)
  *   - 429 retry with exponential backoff as fallback
  *   - Queue-and-wait when rate limit tokens exhausted
  */
@@ -23,6 +25,7 @@ const redis = new Redis(REDIS_URL, {
     return Math.min(times * 200, 2000);
   },
   lazyConnect: true,
+  enableReadyCheck: false,
 });
 
 let redisConnected = false;
@@ -41,13 +44,12 @@ redis.connect().catch(() => {});
 
 // ── Rate Limiter Config ──
 const RATE_LIMIT_KEY = 'ratelimit:central-api';
-const MAX_TOKENS = 20;           // 20 req/min (5 below the 25 hard limit)
+const MAX_TOKENS = 20;           // 20 req/min (below the 30 hard limit)
 const WINDOW_MS = 60 * 1000;     // 1 minute window
 const MAX_WAIT_MS = 30000;       // Max wait time for a token
-const POLL_INTERVAL_MS = 500;    // Check every 500ms for available token
+const POLL_INTERVAL_MS = 100;    // Check every 100ms for available token (was 500ms)
 
-// Lua script for atomic token bucket consumption
-// Returns: 1 if token acquired, 0 if no tokens available
+// Optimized Lua script — single HMSET/PEXPIRE path
 const TOKEN_BUCKET_LUA = `
   local key = KEYS[1]
   local max_tokens = tonumber(ARGV[1])
@@ -58,20 +60,16 @@ const TOKEN_BUCKET_LUA = `
   local tokens = tonumber(bucket[1])
   local last_refill = tonumber(bucket[2])
 
-  -- Initialize if first call
   if tokens == nil then
     tokens = max_tokens
     last_refill = now
   end
 
-  -- Refill tokens based on elapsed time
   local elapsed = now - last_refill
   if elapsed >= window_ms then
-    -- Full window elapsed, refill completely
     tokens = max_tokens
     last_refill = now
   elseif elapsed > 0 then
-    -- Partial refill: tokens accumulate linearly
     local refill = math.floor((elapsed / window_ms) * max_tokens)
     if refill > 0 then
       tokens = math.min(max_tokens, tokens + refill)
@@ -79,17 +77,15 @@ const TOKEN_BUCKET_LUA = `
     end
   end
 
-  -- Try to consume a token
+  local acquired = 0
   if tokens > 0 then
     tokens = tokens - 1
-    redis.call('HMSET', key, 'tokens', tokens, 'last_refill', last_refill)
-    redis.call('PEXPIRE', key, window_ms * 2)
-    return 1
-  else
-    redis.call('HMSET', key, 'tokens', tokens, 'last_refill', last_refill)
-    redis.call('PEXPIRE', key, window_ms * 2)
-    return 0
+    acquired = 1
   end
+
+  redis.call('HMSET', key, 'tokens', tokens, 'last_refill', last_refill)
+  redis.call('PEXPIRE', key, window_ms * 2)
+  return acquired
 `;
 
 // In-memory fallback rate limiter (when Redis is down)
@@ -143,7 +139,7 @@ async function acquireToken() {
       if (fallbackTryConsume()) return;
     }
 
-    // Wait and retry
+    // Wait and retry (100ms instead of 500ms for faster token acquisition)
     await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
   }
 
@@ -151,7 +147,43 @@ async function acquireToken() {
   console.warn('[central-api-client] Rate limit token wait timeout — allowing request');
 }
 
-// ── Cache Config ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── L1 In-Memory Cache (hot data, ~10s TTL, zero-latency reads) ──
+// ══════════════════════════════════════════════════════════════════════════════
+
+const memoryCache = new Map();
+const MEMORY_CACHE_MAX_SIZE = 200;
+const MEMORY_CACHE_TTL_RATIO = 0.15; // L1 TTL = 15% of L2 TTL (keeps data fresh)
+
+function getFromMemory(key) {
+  const entry = memoryCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    memoryCache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setMemory(key, data, l2TtlSeconds) {
+  // Evict oldest entries if at capacity (simple FIFO eviction)
+  if (memoryCache.size >= MEMORY_CACHE_MAX_SIZE) {
+    const firstKey = memoryCache.keys().next().value;
+    memoryCache.delete(firstKey);
+  }
+  const ttlMs = Math.max(l2TtlSeconds * MEMORY_CACHE_TTL_RATIO * 1000, 5000); // Min 5s
+  memoryCache.set(key, { data, expiresAt: Date.now() + ttlMs });
+}
+
+// Periodic L1 cleanup (every 30 seconds)
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of memoryCache.entries()) {
+    if (now > entry.expiresAt) memoryCache.delete(key);
+  }
+}, 30000);
+
+// ── L2 Redis Cache Config ──
 const CACHE_PREFIX = 'cache:central:';
 
 // TTL map by URL pattern (seconds)
@@ -180,7 +212,7 @@ function buildCacheKey(url, params) {
 }
 
 /**
- * Try to get cached response from Redis
+ * Try to get cached response from Redis (L2)
  */
 async function getFromCache(cacheKey) {
   if (!redisConnected) return null;
@@ -196,23 +228,20 @@ async function getFromCache(cacheKey) {
 }
 
 /**
- * Store response in Redis cache
+ * Store response in Redis cache (L2) — fire and forget (non-blocking)
  */
-async function setCache(cacheKey, data, ttlSeconds) {
+function setCache(cacheKey, data, ttlSeconds) {
   if (!redisConnected) return;
-  try {
-    await redis.setex(cacheKey, ttlSeconds, JSON.stringify(data));
-  } catch (err) {
-    // Non-critical — log and continue
+  redis.setex(cacheKey, ttlSeconds, JSON.stringify(data)).catch((err) => {
     console.warn('[central-api-client] Cache write failed:', err.message);
-  }
+  });
 }
 
 // ── Axios Client ──
 const centralApiClient = axios.create({
   baseURL: CENTRAL_API_URL,
   headers: { Authorization: `Bearer ${CENTRAL_API_TOKEN}` },
-  timeout: 15000,
+  timeout: 10000,  // Reduced from 15s to 10s
 });
 
 // 429 retry interceptor (fallback safety net)
@@ -258,30 +287,59 @@ centralApiClient.interceptors.response.use(
   }
 );
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Request Coalescing ──
+// Deduplicates concurrent identical GET requests so only one hits the API
+// ══════════════════════════════════════════════════════════════════════════════
+
+const inflightRequests = new Map();
+
 /**
- * Cached + rate-limited GET request
- * Checks Redis cache first, acquires rate limit token, then calls API
+ * Two-tier cached + rate-limited + coalesced GET request
+ * L1 (memory) → L2 (Redis) → coalesce → acquire token → API
  */
 async function cachedGet(url, options = {}) {
   const cacheKey = buildCacheKey(url, options.params);
 
-  // 1. Check cache
-  const cached = await getFromCache(cacheKey);
-  if (cached) {
-    return { data: cached, status: 200, statusText: 'OK (cached)', cached: true };
+  // 1. Check L1 in-memory cache (zero latency)
+  const memCached = getFromMemory(cacheKey);
+  if (memCached) {
+    return { data: memCached, status: 200, statusText: 'OK (L1 cache)', cached: true };
   }
 
-  // 2. Acquire rate limit token
-  await acquireToken();
+  // 2. Check L2 Redis cache
+  const redisCached = await getFromCache(cacheKey);
+  if (redisCached) {
+    // Promote to L1 for subsequent reads
+    const ttl = getCacheTTL(url);
+    setMemory(cacheKey, redisCached, ttl);
+    return { data: redisCached, status: 200, statusText: 'OK (L2 cache)', cached: true };
+  }
 
-  // 3. Make the actual request
-  const response = await centralApiClient.get(url, options);
+  // 3. Request coalescing — if same request is in-flight, wait for it
+  const existing = inflightRequests.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
 
-  // 4. Cache the response
-  const ttl = getCacheTTL(url);
-  await setCache(cacheKey, response.data, ttl);
+  // 4. Cache miss — acquire token and fetch from API
+  const fetchPromise = (async () => {
+    await acquireToken();
+    const response = await centralApiClient.get(url, options);
 
-  return response;
+    // Store in both cache tiers
+    const ttl = getCacheTTL(url);
+    setMemory(cacheKey, response.data, ttl);
+    setCache(cacheKey, response.data, ttl); // fire-and-forget
+
+    return response;
+  })();
+
+  // Track in-flight request
+  inflightRequests.set(cacheKey, fetchPromise);
+  fetchPromise.finally(() => inflightRequests.delete(cacheKey));
+
+  return fetchPromise;
 }
 
 /**
@@ -312,6 +370,11 @@ function centralApi() {
  * Invalidate cache entries matching a pattern
  */
 async function invalidateCache(pattern) {
+  // Clear L1
+  for (const key of memoryCache.keys()) {
+    if (key.includes(pattern)) memoryCache.delete(key);
+  }
+  // Clear L2
   if (!redisConnected) return;
   try {
     const keys = await redis.keys(`${CACHE_PREFIX}${pattern}*`);
@@ -324,21 +387,24 @@ async function invalidateCache(pattern) {
 }
 
 /**
- * Get cache stats for monitoring
+ * Get cache stats for monitoring (O(1) — no KEYS scan)
  */
 async function getCacheStats() {
-  if (!redisConnected) return { connected: false };
+  const l1Entries = memoryCache.size;
+  if (!redisConnected) return { connected: false, l1Entries };
   try {
-    const keys = await redis.keys(`${CACHE_PREFIX}*`);
     const bucket = await redis.hmget(RATE_LIMIT_KEY, 'tokens', 'last_refill');
+    const dbSize = await redis.dbsize();
     return {
       connected: true,
-      cachedEntries: keys.length,
+      l1Entries,
+      l2Entries: dbSize,
       rateLimitTokens: parseInt(bucket[0]) || 0,
       rateLimitLastRefill: parseInt(bucket[1]) || 0,
+      inflightRequests: inflightRequests.size,
     };
   } catch (err) {
-    return { connected: false, error: err.message };
+    return { connected: false, error: err.message, l1Entries };
   }
 }
 
