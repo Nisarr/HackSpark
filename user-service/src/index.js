@@ -1,103 +1,85 @@
 const express = require('express');
 const cors = require('cors');
-const { Pool } = require('pg');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 8001;
 
-// ── Postgres Setup ──
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgres://rentpi:localpassword@postgres:5432/rentpi_local'
-});
+// ── Supabase Setup ──
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key';
-
-async function initDB() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      name VARCHAR(255) NOT NULL,
-      email VARCHAR(255) UNIQUE NOT NULL,
-      password_hash VARCHAR(255) NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.warn('[user-service] WARNING: Missing SUPABASE_URL or SUPABASE_KEY — auth will fail!');
 }
-initDB().catch(console.error);
+const supabase = createClient(SUPABASE_URL || '', SUPABASE_KEY || '');
+
 app.use(cors());
 app.use(express.json());
 
 const { centralApi, getCacheStats } = require('./central-api-client');
 
-// Auth Middleware
+// Supabase Auth Middleware
 async function authMiddleware(req, res, next) {
   const h = req.headers.authorization;
   if (!h || !h.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing auth header' });
   const token = h.split(' ')[1];
   
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: 'Invalid token' });
-  }
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return res.status(401).json({ error: 'Invalid token' });
+  
+  req.user = { id: user.id, name: user.user_metadata?.name || 'Unknown', email: user.email };
+  next();
 }
 
 // P1
-app.get('/status', (req, res) => res.json({ service: 'user-service', status: 'OK' }));
+app.get('/status', (req, res) => {
+  const cacheStats = getCacheStats();
+  res.json({ service: 'user-service', status: 'OK', cache: cacheStats });
+});
 
-// P2: Register via Postgres
+// P2: Register via Supabase
 app.post('/users/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
     if (!name || !email || !password) return res.status(400).json({ error: 'name, email, password required' });
     
-    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
-    if (existing.rows.length > 0) return res.status(409).json({ error: 'Email already registered' });
-    
-    const hash = await bcrypt.hash(password, 10);
-    const result = await pool.query(
-      'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email, created_at',
-      [name, email, hash]
-    );
-    
-    const user = result.rows[0];
-    const token = jwt.sign({ id: user.id, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
-    
-    res.status(201).json({ user, token });
-  } catch (err) { 
-    console.error(err.message); 
-    res.status(500).json({ error: 'Internal server error' }); 
-  }
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { name } }
+    });
+
+    if (error) {
+      if (error.status === 422 || error.message.toLowerCase().includes('already registered')) {
+        return res.status(409).json({ error: 'Email already registered' });
+      }
+      return res.status(400).json({ error: error.message });
+    }
+
+    const token = data.session?.access_token || null;
+    res.status(201).json({ 
+      user: { id: data.user.id, name: data.user.user_metadata?.name || name, email: data.user.email, created_at: data.user.created_at },
+      token 
+    });
+  } catch (err) { console.error('[user-service] Register error:', err.message); res.status(500).json({ error: 'Internal server error' }); }
 });
 
-// P2: Login via Postgres
+// P2: Login via Supabase
 app.post('/users/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'email and password required' });
     
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-    const user = result.rows[0];
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-    
-    const match = await bcrypt.compare(password, user.password_hash);
-    if (!match) return res.status(401).json({ error: 'Invalid credentials' });
-    
-    const token = jwt.sign({ id: user.id, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    if (error) return res.status(401).json({ error: 'Invalid credentials' });
     
     res.json({ 
-      user: { id: user.id, name: user.name, email: user.email, created_at: user.created_at }, 
-      token 
+      user: { id: data.user.id, name: data.user.user_metadata?.name || 'Unknown', email: data.user.email, created_at: data.user.created_at }, 
+      token: data.session.access_token 
     });
-  } catch (err) { 
-    console.error(err.message); 
-    res.status(500).json({ error: 'Internal server error' }); 
-  }
+  } catch (err) { console.error('[user-service] Login error:', err.message); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // P2: Me (protected)
@@ -132,5 +114,7 @@ app.get('/users/:id/discount', async (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`[user-service] listening on port ${PORT}`));
-
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`[user-service] listening on port ${PORT}`);
+  console.log(`[user-service] Supabase URL: ${SUPABASE_URL ? '✓ configured' : '✗ MISSING'}`);
+});
