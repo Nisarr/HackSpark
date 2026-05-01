@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
-import { Sun, Moon, Package, Calendar, TrendingUp, Tag, BarChart2, MessageSquare, LogOut, LogIn, Globe, Activity } from 'lucide-react';
+import { Sun, Moon, Package, Calendar, TrendingUp, Tag, BarChart2, MessageSquare, LogOut, LogIn, Globe, Activity, Trophy, Heart, Pause, Layers } from 'lucide-react';
 import Home from './pages/Home';
 import Pulse from './pages/Pulse';
 import Login from './pages/Login';
@@ -11,18 +11,26 @@ import Trending from './pages/Trending';
 import Discount from './pages/Discount';
 import Analytics from './pages/Analytics';
 import ChatPage from './pages/Chat';
+import KthBusiest from './pages/KthBusiest';
+import TopCategories from './pages/TopCategories';
+import FreeStreak from './pages/FreeStreak';
+import MergedFeed from './pages/MergedFeed';
 import ChatWidget from './components/ChatWidget';
 import RateLimitOverlay from './components/RateLimitOverlay';
 
 const NAV_ITEMS = [
-  { to: '/',             icon: Globe, label: 'Home' },
-  { to: '/products',     icon: Package, label: 'Products' },
-  { to: '/availability', icon: Calendar, label: 'Availability' },
-  { to: '/trending',     icon: TrendingUp, label: 'Trending' },
-  { to: '/discount',     icon: Tag, label: 'Discounts' },
-  { to: '/analytics',   icon: BarChart2, label: 'Analytics' },
-  { to: '/pulse',        icon: Activity, label: 'Pulse' },
-  { to: '/chat',         icon: MessageSquare, label: 'AI Chat' },
+  { to: '/',               icon: Globe, label: 'Home' },
+  { to: '/products',       icon: Package, label: 'Products' },
+  { to: '/availability',   icon: Calendar, label: 'Availability' },
+  { to: '/trending',       icon: TrendingUp, label: 'Trending' },
+  { to: '/discount',       icon: Tag, label: 'Discounts' },
+  { to: '/analytics',      icon: BarChart2, label: 'Analytics' },
+  { to: '/kth-busiest',    icon: Trophy, label: 'Record Day' },
+  { to: '/top-categories', icon: Heart, label: 'Favorites' },
+  { to: '/free-streak',    icon: Pause, label: 'Free Streak' },
+  { to: '/merged-feed',    icon: Layers, label: 'Feed' },
+  { to: '/pulse',          icon: Activity, label: 'Pulse' },
+  { to: '/chat',           icon: MessageSquare, label: 'AI Chat' },
 ];
 
 function TopNav({ darkMode, toggleDarkMode }) {
@@ -147,6 +155,10 @@ export default function App() {
             <Route path="/trending"     element={<ProtectedRoute><Trending /></ProtectedRoute>} />
             <Route path="/discount"     element={<ProtectedRoute><Discount /></ProtectedRoute>} />
             <Route path="/analytics"    element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+            <Route path="/kth-busiest"  element={<ProtectedRoute><KthBusiest /></ProtectedRoute>} />
+            <Route path="/top-categories" element={<ProtectedRoute><TopCategories /></ProtectedRoute>} />
+            <Route path="/free-streak"  element={<ProtectedRoute><FreeStreak /></ProtectedRoute>} />
+            <Route path="/merged-feed"  element={<ProtectedRoute><MergedFeed /></ProtectedRoute>} />
             <Route path="/pulse"        element={<ProtectedRoute><Pulse /></ProtectedRoute>} />
           </Routes>
         </main>

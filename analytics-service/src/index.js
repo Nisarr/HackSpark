@@ -25,6 +25,10 @@ app.get('/analytics/peak-window', async (req, res) => {
 
     const [fy, fm] = from.split('-').map(Number);
     const [ty, tm] = to.split('-').map(Number);
+    if (fm < 1 || fm > 12 || tm < 1 || tm > 12) {
+      return res.status(400).json({ error: 'Invalid month (must be 1-12)' });
+    }
+
     const monthDiff = (ty - fy) * 12 + (tm - fm);
     if (monthDiff > 11) return res.status(400).json({ error: 'Max range is 12 months' });
 
@@ -37,7 +41,10 @@ app.get('/analytics/peak-window', async (req, res) => {
         const { data } = await centralApi().get('/api/data/rentals/stats', {
           params: { group_by: 'date', month },
         });
-        for (const d of data.data) dailyMap[d.date] = d.count;
+        for (const d of data.data) {
+          const dateOnly = d.date.split('T')[0];
+          dailyMap[dateOnly] = d.count;
+        }
       } catch (err) {
         if (err.response?.status === 503) throw err;
       }
@@ -100,15 +107,25 @@ app.get('/analytics/surge-days', async (req, res) => {
       return res.status(400).json({ error: 'month must be a valid YYYY-MM string' });
     }
 
+    const [y, m] = month.split('-').map(Number);
+    if (m < 1 || m > 12) {
+      return res.status(400).json({ error: 'Month must be between 01 and 12' });
+    }
+    if (y < 2000 || y > 2100) {
+      return res.status(400).json({ error: 'Year must be between 2000 and 2100' });
+    }
+
     const { data } = await centralApi().get('/api/data/rentals/stats', {
       params: { group_by: 'date', month },
     });
 
     const countMap = {};
-    for (const d of data.data) countMap[d.date] = d.count;
+    for (const d of data.data) {
+      const dateOnly = d.date.split('T')[0];
+      countMap[dateOnly] = d.count;
+    }
 
     // Build full month array (fill missing with 0)
-    const [y, m] = month.split('-').map(Number);
     const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
     const days = [];
     for (let d = 1; d <= daysInMonth; d++) {
