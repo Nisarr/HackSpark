@@ -46,16 +46,16 @@ app.get('/analytics/peak-window', async (req, res) => {
     }
 
     // Build array of every calendar day in range with counts (missing = 0)
-    const rangeStart = new Date(`${from}-01`);
-    const lastMonth = new Date(ty, tm, 0); // last day of `to` month
-    const rangeEnd = lastMonth;
+    // Use Date.UTC to avoid local timezone offset issues when formatting to ISO string
+    const rangeStart = new Date(Date.UTC(fy, fm - 1, 1));
+    const rangeEnd = new Date(Date.UTC(ty, tm, 0)); // last day of `to` month
 
     const days = [];
     const cursor = new Date(rangeStart);
     while (cursor <= rangeEnd) {
       const dateStr = cursor.toISOString().split('T')[0];
       days.push({ date: dateStr, count: dailyMap[dateStr] || 0 });
-      cursor.setDate(cursor.getDate() + 1);
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
 
     if (days.length < 7) {
