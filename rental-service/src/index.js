@@ -20,6 +20,28 @@ app.get('/status', async (req, res) => {
   res.json({ service: 'rental-service', status: 'OK', cache: cacheStats });
 });
 
+// ── KPI Dashboard Data ──
+app.get('/rentals/kpi', async (req, res) => {
+  try {
+    const productsRes = await centralApi().get('/api/data/products', { params: { limit: 1 } });
+    const totalProducts = productsRes.data.total || 0;
+
+    const statsRes = await centralApi().get('/api/data/rentals/stats', { params: { group_by: 'category' } });
+    const categoryStats = statsRes.data.data || [];
+    
+    const totalRentals = categoryStats.reduce((sum, c) => sum + (c.rental_count || 0), 0);
+
+    res.json({
+      totalProducts,
+      totalRentals,
+      categoryStats
+    });
+  } catch (err) {
+    console.error('[rental-service] KPI error:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ── P3 + P5: List products (proxy with category validation) ──
 app.get('/rentals/products', async (req, res) => {
   try {
